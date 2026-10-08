@@ -37,7 +37,7 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       Record<never, never>,
       | '//(index)'
-      | '//table'
+      | '//table/[deck]'
     >,
     '//(index)': RouteRecordInfo<
       '//(index)',
@@ -46,11 +46,11 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
-    '//table': RouteRecordInfo<
-      '//table',
-      '/table',
-      Record<never, never>,
-      Record<never, never>,
+    '//table/[deck]': RouteRecordInfo<
+      '//table/[deck]',
+      '/table/:deck',
+      { deck: ParamValue<true> },
+      { deck: ParamValue<false> },
       | never
     >,
     '/[...path]': RouteRecordInfo<
@@ -77,7 +77,7 @@ declare module 'vue-router/auto-routes' {
       routes:
         | '/'
         | '//(index)'
-        | '//table'
+        | '//table/[deck]'
       views:
         | 'default'
       pathParamNames:
@@ -91,13 +91,13 @@ declare module 'vue-router/auto-routes' {
       pathParamNames:
         | never
     }
-    'src/pages/index/table.vue': {
+    'src/pages/index/table/[deck].vue': {
       routes:
-        | '//table'
+        | '//table/[deck]'
       views:
         | never
       pathParamNames:
-        | never
+        | 'deck'
     }
     'src/pages/[...path].vue': {
       routes:

@@ -1,0 +1,6 @@
+@TableStateServer_HostAddress = http://localhost:5271
+
+GET {{TableStateServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
