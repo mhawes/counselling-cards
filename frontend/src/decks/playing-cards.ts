@@ -26,8 +26,8 @@ function cardAlt(rank: string, suit: string) {
 export const playingCardsDeck: Deck = {
   id: "playing-cards",
   name: "Playing Cards",
-  cardWidth: 166,
-  cardHeight: 241,
+  cardWidth: 160,
+  cardHeight: 235,
   backImageUrl: "src/assets/playing-cards/back.png",
   cards: [
     ...suits.flatMap((suit) =>

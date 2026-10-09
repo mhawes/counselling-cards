@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.SignalR;
 using TableStateServer.Hubs;
+using TableStateServer.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add SignalR services with detailed logging
 builder.Services.AddSignalR();
+builder.Services.AddHostedService<InactiveTableCleanupService>();
 builder.Logging.AddConsole();
 builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
@@ -30,12 +32,5 @@ app.UseStaticFiles();
 
 // Map the SignalR hub
 app.MapHub<TableStateHub>("/tableStateHub");
-
-// API endpoint to get active tables
-app.MapGet("/api/tables", () =>
-{
-    var tables = new System.Collections.Generic.Dictionary<string, int>(TableStateHub.ActiveTables);
-    return tables;
-});
 
 app.Run();

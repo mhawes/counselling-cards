@@ -2,6 +2,9 @@
   <q-page class="flex flex-center deck-selection-page">
     <div class="deck-selection-container">
       <div class="text-h4 text-center q-mb-lg">Choose a Deck</div>
+      <div v-if="createError" class="text-negative text-center q-mb-md">
+        {{ createError }}
+      </div>
       <div class="deck-grid">
         <q-card
           v-for="deck in availableDecks"
@@ -22,9 +25,10 @@
           <q-card-actions align="center">
             <q-btn
               color="secondary"
-              :to="`/table/${deck.id}`"
-              label="Use Deck"
+              label="Create Table"
               no-caps
+              :loading="creatingTable"
+              @click="createTable(deck.id)"
             />
           </q-card-actions>
         </q-card>
@@ -32,49 +36,34 @@
 
       <q-card class="join-table-card" flat bordered>
         <q-card-section class="text-center">
-          <div class="text-h6 text-weight-bold">
-            Join a Table
-          </div>
+          <div class="text-h6 text-weight-bold">Join a Table</div>
           <div class="text-caption q-mt-sm">
-            Join an existing shared table so you can see and move cards in real time.
+            Enter the five-letter join code shared by the table creator.
           </div>
-          <q-card-actions align="center" class="q-mt-md">
-            <q-dialog v-model="showTablePicker">
-              <q-card style="min-width: 300px">
-                <q-card-section>
-                  <div class="text-h6">Active Tables</div>
-                </q-card-section>
-                <q-card-section v-if="loadingTables">
-                  <q-spinner color="primary" size="32px" class="self-center" />
-                </q-card-section>
-                <q-card-section v-else-if="activeTables.length === 0">
-                  <div class="text-grey">
-                    No active tables. Open a deck to start one.
-                  </div>
-                </q-card-section>
-                <q-card-section v-else>
-                  <q-btn
-                    v-for="table in activeTables"
-                    :key="table.tableId"
-                    class="q-mb-sm"
-                    unelevated
-                    color="primary"
-                    text-color="white"
-                    :label="`${table.deckName} (${table.connections} connected)`"
-                    no-caps
-                    @click="joinTable(table.tableId)"
-                    style="width: 100%"
-                  />
-                </q-card-section>
-              </q-card>
-            </q-dialog>
-
+          <q-card-section class="q-pt-md">
+            <q-input
+              v-model="joinCode"
+              dark
+              outlined
+              maxlength="5"
+              label="Join code"
+              input-class="text-uppercase"
+              color="white"
+              @update:model-value="normalizeJoinCode"
+              @keyup.enter="joinTable"
+            />
+            <div v-if="joinError" class="text-negative q-mt-sm">
+              {{ joinError }}
+            </div>
+          </q-card-section>
+          <q-card-actions align="center">
             <q-btn
               color="primary"
               label="Join Table"
               no-caps
               icon="group"
-              @click="loadActiveTables"
+              :disable="!isJoinCodeValid"
+              @click="joinTable"
             />
           </q-card-actions>
         </q-card-section>
@@ -84,46 +73,44 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { availableDecks, getDeckById } from "@/decks";
+import { availableDecks } from "@/decks";
+import { startConnection } from "@/services/signalr";
 
 const router = useRouter();
-const showTablePicker = ref(false);
-const loadingTables = ref(false);
-const activeTables = ref<Array<{ tableId: string; deckName: string; connections: number }>>([]);
+const joinCode = ref("");
+const joinError = ref("");
+const createError = ref("");
+const creatingTable = ref(false);
+const isJoinCodeValid = computed(() => /^[A-Z]{5}$/.test(joinCode.value));
 
-const SIGNALR_URL = import.meta.env.VITE_SIGNALR_URL ?? "http://localhost:5271";
+function normalizeJoinCode(value: string | number | null) {
+  joinCode.value = String(value ?? "")
+    .replace(/[^a-z]/gi, "")
+    .toUpperCase()
+    .slice(0, 5);
+  joinError.value = "";
+}
 
-async function loadActiveTables() {
-  loadingTables.value = true;
-  showTablePicker.value = true;
+async function createTable(deckId: string) {
+  creatingTable.value = true;
+  createError.value = "";
   try {
-    const response = await fetch(`${SIGNALR_URL}/api/tables`);
-    if (!response.ok) throw new Error("Failed to fetch tables");
-    const tables: Record<string, number> = await response.json();
-
-    activeTables.value = Object.entries(tables)
-      .map(([tableId, connections]) => {
-        const deck = getDeckById(tableId);
-        return {
-          tableId,
-          deckName: deck ? deck.name : tableId,
-          connections,
-        };
-      })
-      .sort((a, b) => b.connections - a.connections);
+    const connection = await startConnection();
+    const code = await connection.invoke<string>("CreateTable", deckId);
+    await router.push(`/table/${code}`);
   } catch (err) {
-    console.warn("Failed to load active tables:", err);
-    activeTables.value = [];
+    console.error("Failed to create table:", err);
+    createError.value = "Could not create a table. Please try again.";
   } finally {
-    loadingTables.value = false;
+    creatingTable.value = false;
   }
 }
 
-function joinTable(tableId: string) {
-  showTablePicker.value = false;
-  router.push(`/table/${tableId}`);
+function joinTable() {
+  if (!isJoinCodeValid.value) return;
+  void router.push(`/table/${joinCode.value}`);
 }
 </script>
 

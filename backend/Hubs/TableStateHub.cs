@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.SignalR;
 using TableStateServer.Models;
 
@@ -7,7 +8,7 @@ namespace TableStateServer.Hubs;
 
 /// <summary>
 /// SignalR hub for broadcasting table state between clients.
-/// One client broadcasts card positions, and all other connected clients receive and render them.
+/// Clients create and join coded tables, then share card state with other table members.
 /// </summary>
 public class TableStateHub : Hub
 {
@@ -28,12 +29,16 @@ public class TableStateHub : Hub
     public static readonly ConcurrentDictionary<string, TableState> TableStates = new();
 
     /// <summary>
-    /// Get the list of active tables (tables with at least one connected client).
+    /// Maps each generated join code to the deck used by that table.
     /// </summary>
-    public IReadOnlyDictionary<string, int> GetActiveTables()
-    {
-        return new Dictionary<string, int>(ActiveTables);
-    }
+    private static readonly ConcurrentDictionary<string, string> TableDecks = new();
+
+    private static readonly ConcurrentDictionary<string, DateTime> TableCreatedAt = new();
+
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> TableLocks = new();
+
+    private const string JoinCodeCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
     /// <summary>
     /// Called by a client to broadcast the current table state to all other connected clients.
     /// </summary>
@@ -53,46 +58,81 @@ public class TableStateHub : Hub
     }
 
     /// <summary>
-    /// Called when a client joins a table group to receive updates for that table.
-    /// Returns the current table state if one exists, so the new client can render the existing layout.
+    /// Creates a table for the selected deck and returns its unique join code.
     /// </summary>
-    public async Task<TableState?> JoinTable(string tableId)
+    public string CreateTable(string deckId)
     {
+        if (string.IsNullOrWhiteSpace(deckId))
+        {
+            throw new HubException("A deck must be selected to create a table.");
+        }
+
+        string tableId;
+        do
+        {
+            tableId = GenerateJoinCode();
+        }
+        while (!TableDecks.TryAdd(tableId, deckId));
+
+        TableCreatedAt[tableId] = DateTime.UtcNow;
+        Console.WriteLine($"[SignalR] Created table {tableId} for deck {deckId}");
+        return tableId;
+    }
+
+    /// <summary>
+    /// Joins a table by its code and returns its deck and current state, if one exists.
+    /// </summary>
+    public async Task<TableJoinResult> JoinTable(string joinCode)
+    {
+        var tableId = NormalizeJoinCode(joinCode);
         var connectionId = Context.ConnectionId;
-        Console.WriteLine($"[SignalR] JoinTable: connection {connectionId} joining table {tableId}");
-        
-        // Check state BEFORE adding to group — this tells us if we're the first client
-        bool hasExistingState = TableStates.TryGetValue(tableId, out TableState? currentState);
-        
-        await Groups.AddToGroupAsync(connectionId, tableId);
-        
-        // Track that this connection is in this table
-        ConnectionTables.AddOrUpdate(connectionId, 
-            new HashSet<string> { tableId },
-            (_, tables) => { tables.Add(tableId); return tables; });
-        
-        int newCount = ActiveTables.AddOrUpdate(tableId, 1, (_, count) => count + 1);
+        var tableLock = GetTableLock(tableId);
+        await tableLock.WaitAsync();
+        string deckId;
+        bool hasExistingState;
+        TableState? currentState;
+        int newCount;
+        try
+        {
+            if (!TableDecks.TryGetValue(tableId, out var foundDeckId))
+            {
+                throw new HubException("That join code was not found.");
+            }
+            deckId = foundDeckId;
+
+            Console.WriteLine($"[SignalR] JoinTable: connection {connectionId} joining table {tableId}");
+            hasExistingState = TableStates.TryGetValue(tableId, out currentState);
+
+            await Groups.AddToGroupAsync(connectionId, tableId);
+
+            ConnectionTables.AddOrUpdate(connectionId,
+                new HashSet<string> { tableId },
+                (_, tables) => { tables.Add(tableId); return tables; });
+
+            newCount = ActiveTables.AddOrUpdate(tableId, 1, (_, count) => count + 1);
+        }
+        finally
+        {
+            tableLock.Release();
+        }
+
         Console.WriteLine($"[SignalR] ActiveTables count for {tableId}: {newCount}");
         Console.WriteLine($"[SignalR] Connection {connectionId} tables: {string.Join(", ", ConnectionTables[connectionId])}");
-        
+
         await Clients.All.SendAsync("ClientJoinedTable", tableId, connectionId);
 
-        // If there's existing state, return it so the joining client can render it
         if (hasExistingState && currentState != null)
         {
             Console.WriteLine($"[SignalR] JoinTable returning state: existing state with {currentState.Cards.Count} cards");
-            return currentState;
+            return new TableJoinResult { TableId = tableId, DeckId = deckId, State = currentState };
         }
 
-        // No existing state and this is the first client (count == 1) — they should randomize
         if (newCount == 1)
         {
             Console.WriteLine($"[SignalR] JoinTable returning state: no state (first client)");
-            return null;
+            return new TableJoinResult { TableId = tableId, DeckId = deckId };
         }
 
-        // No existing state but count > 1 — race condition: another client also just joined.
-        // Wait briefly for the other client to store their state, then return it.
         Console.WriteLine($"[SignalR] Race condition detected: no state but {newCount} clients. Waiting for state...");
         for (int i = 0; i < 10; i++)
         {
@@ -100,11 +140,71 @@ public class TableStateHub : Hub
             if (TableStates.TryGetValue(tableId, out TableState? waitedState))
             {
                 Console.WriteLine($"[SignalR] JoinTable returning state: waited {i * 100}ms, found state with {waitedState.Cards.Count} cards");
-                return waitedState;
+                return new TableJoinResult { TableId = tableId, DeckId = deckId, State = waitedState };
             }
         }
         Console.WriteLine($"[SignalR] JoinTable returning state: timeout waiting for state, returning null");
-        return null;
+        return new TableJoinResult { TableId = tableId, DeckId = deckId };
+    }
+
+    private static SemaphoreSlim GetTableLock(string tableId)
+    {
+        return TableLocks.GetOrAdd(tableId, _ => new SemaphoreSlim(1, 1));
+    }
+
+    /// <summary>
+    /// Removes tables that are at least the specified age and have no active connections.
+    /// </summary>
+    public static async Task CleanupExpiredTablesAsync(TimeSpan maxAge, CancellationToken cancellationToken)
+    {
+        var expirationTime = DateTime.UtcNow - maxAge;
+        foreach (var (tableId, createdAt) in TableCreatedAt)
+        {
+            if (createdAt > expirationTime)
+            {
+                continue;
+            }
+
+            var tableLock = GetTableLock(tableId);
+            await tableLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (!TableCreatedAt.TryGetValue(tableId, out var currentCreatedAt) ||
+                    currentCreatedAt > expirationTime ||
+                    ActiveTables.GetValueOrDefault(tableId) > 0)
+                {
+                    continue;
+                }
+
+                TableStates.TryRemove(tableId, out _);
+                TableDecks.TryRemove(tableId, out _);
+                TableCreatedAt.TryRemove(tableId, out _);
+                ActiveTables.TryRemove(tableId, out _);
+                Console.WriteLine($"[SignalR] Removed expired table {tableId}");
+            }
+            finally
+            {
+                tableLock.Release();
+            }
+        }
+    }
+
+    private static string GenerateJoinCode()
+    {
+        return new string(Enumerable.Range(0, 5)
+            .Select(_ => JoinCodeCharacters[RandomNumberGenerator.GetInt32(JoinCodeCharacters.Length)])
+            .ToArray());
+    }
+
+    private static string NormalizeJoinCode(string joinCode)
+    {
+        var normalized = joinCode?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (normalized.Length != 5 || normalized.Any(character => !JoinCodeCharacters.Contains(character)))
+        {
+            throw new HubException("Join codes must be five letters.");
+        }
+
+        return normalized;
     }
 
     /// <summary>
@@ -114,38 +214,41 @@ public class TableStateHub : Hub
     {
         var connectionId = Context.ConnectionId;
         Console.WriteLine($"[SignalR] LeaveTable: connection {connectionId} leaving table {tableId}");
-        await Groups.RemoveFromGroupAsync(connectionId, tableId);
-        
-        // Remove this table from the connection's tracking
-        if (ConnectionTables.TryGetValue(connectionId, out var tables))
+        var tableLock = GetTableLock(tableId);
+        await tableLock.WaitAsync();
+        try
         {
-            tables.Remove(tableId);
-            if (tables.Count == 0)
+            await Groups.RemoveFromGroupAsync(connectionId, tableId);
+
+            if (ConnectionTables.TryGetValue(connectionId, out var tables))
             {
-                ConnectionTables.TryRemove(connectionId, out _);
+                var wasTracked = tables.Remove(tableId);
+                if (tables.Count == 0)
+                {
+                    ConnectionTables.TryRemove(connectionId, out _);
+                }
+                if (wasTracked)
+                {
+                    DecrementActiveConnectionCount(tableId);
+                }
             }
         }
-        
-        ActiveTables.AddOrUpdate(tableId, 0, (_, count) =>
+        finally
         {
-            int newCount = count - 1;
-            if (newCount <= 0)
-            {
-                ActiveTables.TryRemove(tableId, out int _);
-                // Clean up stored state when the last client leaves
-                TableStates.TryRemove(tableId, out TableState? _);
-                Console.WriteLine($"[SignalR] Last client left table {tableId}, state cleaned up");
-                return 0;
-            }
-            return newCount;
-        });
+            tableLock.Release();
+        }
+
         await Clients.All.SendAsync("ClientLeftTable", tableId, connectionId);
+    }
+
+    private static void DecrementActiveConnectionCount(string tableId)
+    {
+        ActiveTables.AddOrUpdate(tableId, 0, (_, count) => Math.Max(0, count - 1));
     }
 
     /// <summary>
     /// Clean up table tracking when a connection is unexpectedly lost.
-    /// Note: We do NOT clean up TableStates here, because a client may be auto-reconnecting
-    /// and the state should be preserved. TableStates are only cleaned up on explicit LeaveTable.
+    /// Preserve the table state on disconnect so clients can reconnect until the table expires.
     /// </summary>
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
@@ -157,20 +260,18 @@ public class TableStateHub : Hub
         {
             foreach (var tableId in tables)
             {
-                Console.WriteLine($"[SignalR] Removing connection {connectionId} from group {tableId}");
-                await Groups.RemoveFromGroupAsync(connectionId, tableId);
-                ActiveTables.AddOrUpdate(tableId, 0, (_, count) =>
+                var tableLock = GetTableLock(tableId);
+                await tableLock.WaitAsync();
+                try
                 {
-                    int newCount = count - 1;
-                    if (newCount <= 0)
-                    {
-                        ActiveTables.TryRemove(tableId, out int _);
-                        // Do NOT remove TableStates here — preserve state for reconnecting clients
-                        Console.WriteLine($"[SignalR] Last client disconnected from table {tableId}, ActiveTables count cleared (state preserved for reconnect)");
-                        return 0;
-                    }
-                    return newCount;
-                });
+                    Console.WriteLine($"[SignalR] Removing connection {connectionId} from group {tableId}");
+                    await Groups.RemoveFromGroupAsync(connectionId, tableId);
+                    DecrementActiveConnectionCount(tableId);
+                }
+                finally
+                {
+                    tableLock.Release();
+                }
             }
         }
         else

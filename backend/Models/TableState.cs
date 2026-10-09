@@ -11,6 +11,11 @@ public class TableState
     public string TableId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Identifier of the deck used by this table.
+    /// </summary>
+    public string DeckId { get; set; } = string.Empty;
+
+    /// <summary>
     /// All card positions on the table.
     /// </summary>
     public List<CardState> Cards { get; set; } = new();

@@ -2,12 +2,14 @@
   <q-page class="table-page">
     <div v-if="!deck" class="table no-deck">
       <div class="no-deck-message">
-        <div class="text-h5">No deck selected</div>
+        <div class="text-h5">
+          {{ tableError || "Joining table..." }}
+        </div>
         <q-btn
           class="q-mt-md"
           color="primary"
           to="/"
-          label="Choose a deck"
+          label="Back to home"
           no-caps
         />
       </div>
@@ -21,9 +23,9 @@
         :data-x="card.x"
         :data-y="card.y"
         :style="{
-          width: `${deck.cardWidth}px`,
-          height: `${deck.cardHeight}px`,
-          zIndex: card.zIndex,
+          width: `calc(${deck.cardWidth}px * var(--card-scale, 1))`,
+          height: `calc(${deck.cardHeight}px * var(--card-scale, 1))`,
+          zIndex: card.zIndex
         }"
         @dblclick="toggleCardFlipped(card)"
       >
@@ -34,7 +36,7 @@
         <div
           class="card-visual"
           :style="{
-            '--card-rotation': `${card.rotation}deg`,
+            '--card-rotation': `${card.rotation}deg`
           }"
         >
           <div class="card-inner" :class="{ flipped: card.flipped }">
@@ -87,6 +89,11 @@
         />
       </q-fab>
     </q-page-sticky>
+    <q-page-sticky v-if="deck" position="top-right" :offset="[18, 18]">
+      <q-chip color="white" text-color="primary" icon="group">
+        Join code: <strong class="q-ml-xs">{{ tableCodeLabel }}</strong>
+      </q-chip>
+    </q-page-sticky>
   </q-page>
 </template>
 
@@ -121,18 +128,20 @@ interface Card {
 
 const route = useRoute();
 const tableRef = ref<HTMLElement | null>(null);
+const tableError = ref("");
+const activeDeckId = ref<string | null>(null);
+const tableCodeLabel = ref("");
 
 let highestZIndex = 0;
 
 const deck = computed<Deck | undefined>(() => {
-  const deckId = (route.params as { deck?: string }).deck;
-  if (!deckId) return undefined;
-  return getDeckById(deckId);
+  return activeDeckId.value ? getDeckById(activeDeckId.value) : undefined;
 });
 
 const cards = ref<Card[]>([]);
 let hubConnection: signalR.HubConnection | null = null;
-let currentDeckId: string | null = null;
+let currentTableCode: string | null = null;
+let joinedTable = false;
 
 function initialiseCards() {
   const deckData = deck.value;
@@ -142,7 +151,7 @@ function initialiseCards() {
   cards.value = deckData.cards.map(
     (
       deckCard: { id: string; assetUrl: string; alt: string },
-      index: number,
+      index: number
     ) => ({
       id: `${deckData.id}-${deckCard.id}`,
       assetUrl: deckCard.assetUrl,
@@ -151,8 +160,8 @@ function initialiseCards() {
       y: 0,
       rotation: 0,
       zIndex: index + 1,
-      flipped: false,
-    }),
+      flipped: false
+    })
   );
 }
 
@@ -174,6 +183,14 @@ function randomCardRotation() {
   return Math.round((Math.random() * 16 - 8) * 10) / 10;
 }
 
+function getRenderedCardSize(table: HTMLElement, currentDeck: Deck) {
+  const cardElement = table.querySelector<HTMLElement>(".table-card");
+  return {
+    width: cardElement?.offsetWidth || currentDeck.cardWidth,
+    height: cardElement?.offsetHeight || currentDeck.cardHeight
+  };
+}
+
 /**
  * Randomly position and rotate all cards.
  */
@@ -187,20 +204,21 @@ function randomiseCardPositions() {
 
   const tableWidth = table.clientWidth;
   const tableHeight = table.clientHeight;
+  const cardSize = getRenderedCardSize(table, currentDeck);
 
-  const maxX = Math.max(0, tableWidth - currentDeck.cardWidth);
-  const maxY = Math.max(0, tableHeight - currentDeck.cardHeight);
+  const maxX = Math.max(0, tableWidth - cardSize.width);
+  const maxY = Math.max(0, tableHeight - cardSize.height);
 
   const elements = table.querySelectorAll<HTMLElement>(".table-card");
 
-  elements.forEach((element) => {
+  elements.forEach(element => {
     const cardId = element.dataset.cardId;
 
     if (!cardId) {
       return;
     }
 
-    const card = cards.value.find((item) => item.id === cardId);
+    const card = cards.value.find(item => item.id === cardId);
 
     if (!card) {
       return;
@@ -230,8 +248,8 @@ function initialiseDragging() {
     modifiers: [
       interact.modifiers.restrictRect({
         restriction: "parent",
-        endOnly: false,
-      }),
+        endOnly: false
+      })
     ],
 
     /**
@@ -242,7 +260,7 @@ function initialiseDragging() {
       container: tableRef.value ?? document.documentElement,
       margin: 40,
       distance: 10,
-      interval: 30,
+      interval: 30
     },
 
     listeners: {
@@ -250,9 +268,13 @@ function initialiseDragging() {
         const element = event.target as HTMLElement;
         const cardId = element.dataset.cardId;
 
-        const card = cards.value.find((item) => item.id === cardId);
+        const card = cards.value.find(item => item.id === cardId);
 
         if (card) {
+          highestZIndex = Math.max(
+            highestZIndex,
+            ...cards.value.map(item => item.zIndex),
+          );
           card.zIndex = ++highestZIndex;
         }
 
@@ -278,7 +300,7 @@ function initialiseDragging() {
 
         element.classList.remove("is-dragging");
 
-        const card = cards.value.find((item) => item.id === cardId);
+        const card = cards.value.find(item => item.id === cardId);
 
         if (!card) {
           return;
@@ -296,8 +318,8 @@ function initialiseDragging() {
          * Broadcast the updated position and rotation to other clients.
          */
         broadcastCardState(card);
-      },
-    },
+      }
+    }
   });
 }
 
@@ -305,18 +327,18 @@ function initialiseDragging() {
  * Build a table state object from the current card states.
  */
 function buildTableState() {
-  const deckId = (route.params as { deck?: string }).deck;
   return {
-    tableId: deckId ?? "default",
-    cards: cards.value.map((card) => ({
+    tableId: currentTableCode ?? "",
+    deckId: activeDeckId.value ?? "",
+    cards: cards.value.map(card => ({
       cardId: card.id,
       x: card.x,
       y: card.y,
       rotation: card.rotation,
       zIndex: card.zIndex,
-      flipped: card.flipped,
+      flipped: card.flipped
     })),
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toISOString()
   };
 }
 
@@ -329,7 +351,7 @@ async function broadcastTableState() {
   await hubConnection.invoke(
     "BroadcastTableStateToGroup",
     tableState.tableId,
-    tableState,
+    tableState
   );
 }
 
@@ -338,19 +360,20 @@ function shuffleAndStackDeck() {
   const currentDeck = deck.value;
   if (!table || !currentDeck || cards.value.length === 0) return;
 
+  const cardSize = getRenderedCardSize(table, currentDeck);
   const maxStackOffset = 8;
   const stackOffsetSpace = Math.min(
     maxStackOffset,
-    Math.max(0, table.clientWidth - currentDeck.cardWidth - 12),
-    Math.max(0, table.clientHeight - currentDeck.cardHeight - 12),
+    Math.max(0, table.clientWidth - cardSize.width - 12),
+    Math.max(0, table.clientHeight - cardSize.height - 12)
   );
   const x = Math.max(
     0,
-    table.clientWidth - currentDeck.cardWidth - 12 - stackOffsetSpace,
+    table.clientWidth - cardSize.width - 12 - stackOffsetSpace
   );
   const y = Math.max(
     0,
-    table.clientHeight - currentDeck.cardHeight - 12 - stackOffsetSpace,
+    table.clientHeight - cardSize.height - 12 - stackOffsetSpace
   );
   const shuffledCards = [...cards.value];
 
@@ -375,7 +398,7 @@ function shuffleAndStackDeck() {
     card.flipped = true;
 
     const element = table.querySelector<HTMLElement>(
-      `[data-card-id="${card.id}"]`,
+      `[data-card-id="${card.id}"]`
     );
     if (element) {
       setCardPosition(element, card.x, card.y);
@@ -388,7 +411,7 @@ function shuffleAndStackDeck() {
 
 function scatterCards() {
   randomiseCardPositions();
-  cards.value.forEach((card) => {
+  cards.value.forEach(card => {
     card.flipped = false;
   });
   void broadcastTableState();
@@ -406,7 +429,7 @@ async function broadcastCardState(card: Card) {
   if (hubConnection.state !== signalR.HubConnectionState.Connected) {
     console.warn(
       "[SignalR] Connection not in Connected state:",
-      hubConnection.state,
+      hubConnection.state
     );
     try {
       hubConnection = await startConnection();
@@ -416,26 +439,25 @@ async function broadcastCardState(card: Card) {
     }
   }
 
-  const deckId = (route.params as { deck?: string }).deck;
   const cardState = {
     cardId: card.id,
     x: card.x,
     y: card.y,
     rotation: card.rotation,
     zIndex: card.zIndex,
-    flipped: card.flipped,
+    flipped: card.flipped
   };
   console.log(
     "[SignalR] Broadcasting card state:",
     cardState,
     "to group:",
-    deckId,
+    currentTableCode
   );
   try {
     await hubConnection.invoke(
       "UpdateCardState",
-      deckId ?? "default",
-      cardState,
+      currentTableCode ?? "",
+      cardState
     );
     console.log("[SignalR] Card state broadcast sent successfully");
   } catch (err) {
@@ -465,25 +487,25 @@ interface CardStateUpdate {
  */
 function applyCardStateUpdate(
   receivedTableId: string,
-  update: CardStateUpdate,
+  update: CardStateUpdate
 ) {
   // Filter by table — only apply updates for our table
-  if (receivedTableId !== currentDeckId) {
+  if (receivedTableId !== currentTableCode) {
     return;
   }
   console.warn(
     "[SignalR] Received card state update for table",
     receivedTableId,
     ":",
-    update,
+    update
   );
-  const card = cards.value.find((c) => c.id === update.cardId);
+  const card = cards.value.find(c => c.id === update.cardId);
   if (!card) {
     console.warn(
       "[SignalR] Card not found for update:",
       update.cardId,
       "Available cards:",
-      cards.value.map((c) => c.id),
+      cards.value.map(c => c.id)
     );
     return;
   }
@@ -496,7 +518,7 @@ function applyCardStateUpdate(
   highestZIndex = Math.max(highestZIndex, update.zIndex);
 
   const element = tableRef.value?.querySelector(
-    `[data-card-id="${update.cardId}"]`,
+    `[data-card-id="${update.cardId}"]`
   ) as HTMLElement | undefined;
   if (element) {
     setCardPosition(element, update.x, update.y);
@@ -511,12 +533,12 @@ function applyTableState(state: {
   cards: CardStateUpdate[];
   timestamp: string;
 }) {
-  state.cards.forEach((cardState) => {
+  state.cards.forEach(cardState => {
     applyCardStateUpdate(state.tableId, cardState);
   });
 }
 
-async function joinTable(deckId: string) {
+async function joinTable(tableCode: string) {
   if (!hubConnection) return;
 
   // Listen for updates from other clients before joining
@@ -524,21 +546,34 @@ async function joinTable(deckId: string) {
   hubConnection.on("ReceiveTableState", applyTableState);
   console.warn(
     "[SignalR] Listeners registered, connection state:",
-    hubConnection.state,
+    hubConnection.state
   );
 
   // Join the table and get the current state (if any)
-  const existingState = await hubConnection.invoke("JoinTable", deckId);
+  const result = await hubConnection.invoke<{
+    tableId: string;
+    deckId: string;
+    state: ReturnType<typeof buildTableState> | null;
+  }>("JoinTable", tableCode);
+  currentTableCode = result.tableId;
+  joinedTable = true;
+  activeDeckId.value = result.deckId;
+  if (!deck.value) {
+    throw new Error("The deck for this table is not available in this client.");
+  }
+  await nextTick();
+  initialiseCards();
+  await nextTick();
   console.warn(
     "[SignalR] Joined table",
-    deckId,
+    result.tableId,
     "- existing state:",
-    existingState ? "yes" : "no",
+    result.state ? "yes" : "no"
   );
 
-  if (existingState) {
+  if (result.state) {
     // A table already exists — apply the saved card states
-    applyTableState(existingState);
+    applyTableState(result.state);
   } else {
     // First client — randomise and broadcast the initial layout
     randomiseCardPositions();
@@ -548,81 +583,79 @@ async function joinTable(deckId: string) {
 
 onMounted(async () => {
   console.warn(
-    "[SignalR] onMounted fired, deck:",
-    (route.params as { deck?: string }).deck,
+    "[SignalR] onMounted fired, table code:",
+    (route.params as { deck?: string }).deck
   );
-  await nextTick();
 
-  initialiseCards();
-  await nextTick();
-
-  // Connect to SignalR and join the table group
-  const deckId = (route.params as { deck?: string }).deck ?? "default";
-  currentDeckId = deckId;
-  let joined = false;
+  const tableCode = String((route.params as { deck?: string }).deck ?? "")
+    .trim()
+    .toUpperCase();
+  currentTableCode = tableCode;
+  tableCodeLabel.value = tableCode;
   try {
     console.warn("[SignalR] Calling startConnection()");
     hubConnection = await startConnection();
     console.warn(
       "[SignalR] startConnection() returned, state:",
-      hubConnection.state,
+      hubConnection.state
     );
 
     // Handle reconnection — re-join the table group after reconnect
-    hubConnection.onreconnected((connectionId) => {
+    hubConnection.onreconnected(connectionId => {
       console.warn("[SignalR] Reconnected with connection ID:", connectionId);
-      if (currentDeckId) {
+      if (currentTableCode) {
         hubConnection
-          ?.invoke("JoinTable", currentDeckId)
-          .then((state) => {
+          ?.invoke<{
+            tableId: string;
+            deckId: string;
+            state: ReturnType<typeof buildTableState> | null;
+          }>("JoinTable", currentTableCode)
+          .then(result => {
             console.warn(
               "[SignalR] Re-joined table after reconnect:",
-              currentDeckId,
+              currentTableCode
             );
-            if (state) {
-              applyTableState(state);
+            if (result.state) {
+              applyTableState(result.state);
             }
           })
-          .catch((err) => {
+          .catch(err => {
             console.error(
               "[SignalR] Failed to re-join table after reconnect:",
-              err,
+              err
             );
           });
       }
     });
 
-    await joinTable(deckId);
-    joined = true;
+    await joinTable(tableCode);
   } catch (err) {
-    console.warn(
-      "SignalR connection failed – card positions will not be broadcast:",
-      err,
-    );
-    // Fallback: randomise locally if SignalR is unavailable
-    if (!joined) {
-      randomiseCardPositions();
-    }
+    tableError.value =
+      err instanceof Error ? err.message : "Could not join this table.";
+    console.warn("SignalR table join failed:", err);
   }
 
-  initialiseDragging();
+  if (joinedTable) {
+    initialiseDragging();
+  }
 });
 
 onUnmounted(() => {
   interact(".table-card").unset();
 
   // Leave the table group and clean up SignalR listeners
-  currentDeckId = null;
+  const tableCode = currentTableCode;
+  currentTableCode = null;
   if (hubConnection) {
-    const deckId = (route.params as { deck?: string }).deck;
-    hubConnection
-      .invoke("LeaveTable", deckId ?? "default")
-      .catch(console.error);
+    if (tableCode && joinedTable) {
+      hubConnection.invoke("LeaveTable", tableCode).catch(console.error);
+    }
     hubConnection.off("ReceiveCardStateUpdate", applyCardStateUpdate);
     hubConnection.off("ReceiveTableState", applyTableState);
     stopConnection();
     hubConnection = null;
   }
+  joinedTable = false;
 });
 </script>
 
@@ -638,6 +671,7 @@ onUnmounted(() => {
 .table {
   position: relative;
   z-index: 0;
+  --card-scale: 1;
 
   width: 100%;
   height: 100%;
@@ -645,6 +679,12 @@ onUnmounted(() => {
   overflow: hidden;
 
   background: radial-gradient(circle at center, #e8dcc8 0%, #d9c8ad 100%);
+}
+
+@media (max-width: 600px) {
+  .table {
+    --card-scale: 0.5;
+  }
 }
 
 .table-controls {
