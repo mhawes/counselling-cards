@@ -34,6 +34,10 @@ export default defineConfig((/* ctx */) => {
       publicPath:
         process.env.GITHUB_PAGES === "true" ? "/counselling-cards/" : "/",
 
+      defineEnv: {
+        VITE_YJS_SIGNALING_URL: process.env.VITE_YJS_SIGNALING_URL ?? ""
+      },
+
       target: {
         // browser: 'baseline-widely-available',
         // node: 'node22'

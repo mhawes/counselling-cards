@@ -28,9 +28,28 @@ export function generateTableCode(): string {
   ).join("");
 }
 
+function getSignalingServers(tableCode: string): string[] | undefined {
+  const configuredUrl = import.meta.env.VITE_YJS_SIGNALING_URL?.trim();
+  if (!configuredUrl) {
+    return undefined;
+  }
+
+  const signalingUrl = new URL(configuredUrl);
+  if (signalingUrl.protocol !== "wss:" && signalingUrl.protocol !== "ws:") {
+    throw new Error("The Yjs signaling URL must use ws:// or wss://.");
+  }
+  signalingUrl.pathname = `${signalingUrl.pathname.replace(/\/+$/, "")}/${encodeURIComponent(tableCode)}`;
+  return [signalingUrl.toString()];
+}
+
 export function createTableSession(tableCode: string): TableSession {
   const doc = new Y.Doc();
-  const provider = new WebrtcProvider(tableCode, doc);
+  const signaling = getSignalingServers(tableCode);
+  const provider = new WebrtcProvider(
+    tableCode,
+    doc,
+    signaling ? { signaling } : undefined
+  );
   return {
     doc,
     provider,

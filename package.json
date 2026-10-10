@@ -20,6 +20,7 @@
     "dev": "quasar dev",
     "build": "quasar build",
     "typecheck": "vue-tsc --noEmit",
+    "test:signaling": "node --test cloudflare/signaling/test/worker.test.js",
     "postinstall": "quasar prepare --silent"
   },
   "dependencies": {
