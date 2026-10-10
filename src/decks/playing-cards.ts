@@ -1,5 +1,18 @@
 import type { Deck } from "./tarot-cats";
 
+const playingCardImages = import.meta.glob<string>(
+  "../assets/playing-cards/*.png",
+  { eager: true, query: "?url", import: "default" }
+);
+
+function getPlayingCardImage(filename: string): string {
+  const imageUrl = playingCardImages[`../assets/playing-cards/${filename}`];
+  if (!imageUrl) {
+    throw new Error(`Missing playing card image: ${filename}`);
+  }
+  return imageUrl;
+}
+
 const suits = ["clubs", "diamonds", "hearts", "spades"] as const;
 const ranks = [
   "ace",
@@ -14,11 +27,12 @@ const ranks = [
   "10",
   "jack",
   "queen",
-  "king",
+  "king"
 ] as const;
 
 function cardAlt(rank: string, suit: string) {
-  const displayRank = rank === "ace" ? "Ace" : rank[0]?.toUpperCase() + rank.slice(1);
+  const displayRank =
+    rank === "ace" ? "Ace" : rank[0]?.toUpperCase() + rank.slice(1);
   const displaySuit = suit[0]?.toUpperCase() + suit.slice(1);
   return `${displayRank} of ${displaySuit}`;
 }
@@ -28,27 +42,27 @@ export const playingCardsDeck: Deck = {
   name: "Playing Cards",
   cardWidth: 160,
   cardHeight: 235,
-  backImageUrl: "src/assets/playing-cards/back.png",
+  backImageUrl: getPlayingCardImage("back.png"),
   cards: [
-    ...suits.flatMap((suit) =>
-      ranks.map((rank) => {
+    ...suits.flatMap(suit =>
+      ranks.map(rank => {
         const id = `${rank}_of_${suit}`;
         return {
           id,
-          assetUrl: `src/assets/playing-cards/${id}.png`,
-          alt: cardAlt(rank, suit),
+          assetUrl: getPlayingCardImage(`${id}.png`),
+          alt: cardAlt(rank, suit)
         };
-      }),
+      })
     ),
     {
       id: "red_joker",
-      assetUrl: "src/assets/playing-cards/red_joker.png",
-      alt: "Red Joker",
+      assetUrl: getPlayingCardImage("red_joker.png"),
+      alt: "Red Joker"
     },
     {
       id: "black_joker",
-      assetUrl: "src/assets/playing-cards/black_joker.png",
-      alt: "Black Joker",
-    },
-  ],
+      assetUrl: getPlayingCardImage("black_joker.png"),
+      alt: "Black Joker"
+    }
+  ]
 };
