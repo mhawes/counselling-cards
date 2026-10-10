@@ -32,7 +32,6 @@ interface ImportMetaEnv {
   readonly DRIVERDATA?: string;
   readonly EDITOR?: string;
   readonly GCM_INTERACTIVE?: string;
-  readonly GITHUB_PAGES?: boolean;
   readonly GIT_ASKPASS?: string;
   readonly GIT_CONFIG_COUNT?: number;
   readonly GIT_CONFIG_KEY_0?: string;
