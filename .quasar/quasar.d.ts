@@ -32,7 +32,9 @@ interface ImportMetaEnv {
   readonly DISPLAY?: string;
   readonly DriverData?: string;
   readonly EDITOR?: string;
-  readonly EFC_15980_1592913036?: number;
+  readonly EFC_1836_1592913036?: number;
+  readonly EFC_1836_2946480783?: number;
+  readonly EFC_1836_4126798990?: number;
   readonly EXEPATH?: string;
   readonly GIT_ASKPASS?: string;
   readonly HOME?: string;
@@ -125,5 +127,4 @@ interface ImportMetaEnv {
   readonly VSCODE_PYTHON_AUTOACTIVATE_GUARD?: number;
   readonly WINDIR?: string;
   readonly _?: string;
-  readonly __COMPAT_LAYER?: string;
 }

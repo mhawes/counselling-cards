@@ -31,6 +31,9 @@ export default defineConfig((/* ctx */) => {
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#build
     build: {
+      publicPath:
+        process.env.GITHUB_PAGES === "true" ? "/counselling-cards/" : "/",
+
       target: {
         // browser: 'baseline-widely-available',
         // node: 'node22'

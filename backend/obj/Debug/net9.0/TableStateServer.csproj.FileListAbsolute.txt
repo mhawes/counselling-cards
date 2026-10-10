@@ -1,9 +1,0 @@
-E:\src\counselling-cards\backend\bin\verify\appsettings.Development.json
-E:\src\counselling-cards\backend\bin\verify\appsettings.json
-E:\src\counselling-cards\backend\bin\verify\TableStateServer.staticwebassets.endpoints.json
-E:\src\counselling-cards\backend\bin\verify\TableStateServer.deps.json
-E:\src\counselling-cards\backend\bin\verify\TableStateServer.runtimeconfig.json
-E:\src\counselling-cards\backend\bin\verify\TableStateServer.dll
-E:\src\counselling-cards\backend\bin\verify\TableStateServer.pdb
-E:\src\counselling-cards\backend\bin\verify\Microsoft.AspNetCore.OpenApi.dll
-E:\src\counselling-cards\backend\bin\verify\Microsoft.OpenApi.dll

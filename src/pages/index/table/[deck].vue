@@ -102,10 +102,15 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import interact from "interactjs";
 import { getDeckById, type Deck } from "@/decks";
-import { startConnection, stopConnection } from "@/services/signalr";
-import * as signalR from "@microsoft/signalr";
-
-console.warn("[SignalR] [deck].vue module loaded");
+import type { YMapEvent } from "yjs";
+import {
+  createTableSession,
+  getTableClientCount,
+  waitForRoomDiscovery,
+  waitForTableReady,
+  type CardState,
+  type TableSession
+} from "@/services/yjs";
 
 interface Card {
   id: string;
@@ -139,31 +144,10 @@ const deck = computed<Deck | undefined>(() => {
 });
 
 const cards = ref<Card[]>([]);
-let hubConnection: signalR.HubConnection | null = null;
-let currentTableCode: string | null = null;
-let joinedTable = false;
-
-function initialiseCards() {
-  const deckData = deck.value;
-  if (!deckData) return;
-
-  highestZIndex = 0;
-  cards.value = deckData.cards.map(
-    (
-      deckCard: { id: string; assetUrl: string; alt: string },
-      index: number
-    ) => ({
-      id: `${deckData.id}-${deckCard.id}`,
-      assetUrl: deckCard.assetUrl,
-      alt: deckCard.alt,
-      x: 0,
-      y: 0,
-      rotation: 0,
-      zIndex: index + 1,
-      flipped: false
-    })
-  );
-}
+let tableSession: TableSession | null = null;
+let disposed = false;
+let tableWaitController: AbortController | null = null;
+let cardStateObserver: ((event: YMapEvent<CardState>) => void) | null = null;
 
 /**
  * Apply the position to a card.
@@ -273,7 +257,7 @@ function initialiseDragging() {
         if (card) {
           highestZIndex = Math.max(
             highestZIndex,
-            ...cards.value.map(item => item.zIndex),
+            ...cards.value.map(item => item.zIndex)
           );
           card.zIndex = ++highestZIndex;
         }
@@ -323,36 +307,28 @@ function initialiseDragging() {
   });
 }
 
-/**
- * Build a table state object from the current card states.
- */
-function buildTableState() {
+function toCardState(card: Card): CardState {
   return {
-    tableId: currentTableCode ?? "",
-    deckId: activeDeckId.value ?? "",
-    cards: cards.value.map(card => ({
-      cardId: card.id,
-      x: card.x,
-      y: card.y,
-      rotation: card.rotation,
-      zIndex: card.zIndex,
-      flipped: card.flipped
-    })),
-    timestamp: new Date().toISOString()
+    cardId: card.id,
+    x: card.x,
+    y: card.y,
+    rotation: card.rotation,
+    zIndex: card.zIndex,
+    flipped: card.flipped
   };
 }
 
-/**
- * Broadcast the full table state to other connected clients.
- */
-async function broadcastTableState() {
-  if (!hubConnection) return;
-  const tableState = buildTableState();
-  await hubConnection.invoke(
-    "BroadcastTableStateToGroup",
-    tableState.tableId,
-    tableState
-  );
+function broadcastCardState(card: Card) {
+  tableSession?.cards.set(card.id, toCardState(card));
+}
+
+function broadcastTableState() {
+  if (!tableSession) return;
+  tableSession.doc.transact(() => {
+    cards.value.forEach(card => {
+      tableSession?.cards.set(card.id, toCardState(card));
+    });
+  });
 }
 
 function shuffleAndStackDeck() {
@@ -418,97 +394,19 @@ function scatterCards() {
 }
 
 /**
- * Broadcast a single card's full state to other connected clients.
- */
-async function broadcastCardState(card: Card) {
-  if (!hubConnection) {
-    console.warn("[SignalR] No hub connection, cannot broadcast card state");
-    return;
-  }
-
-  if (hubConnection.state !== signalR.HubConnectionState.Connected) {
-    console.warn(
-      "[SignalR] Connection not in Connected state:",
-      hubConnection.state
-    );
-    try {
-      hubConnection = await startConnection();
-    } catch (err) {
-      console.error("[SignalR] Failed to reconnect:", err);
-      return;
-    }
-  }
-
-  const cardState = {
-    cardId: card.id,
-    x: card.x,
-    y: card.y,
-    rotation: card.rotation,
-    zIndex: card.zIndex,
-    flipped: card.flipped
-  };
-  console.log(
-    "[SignalR] Broadcasting card state:",
-    cardState,
-    "to group:",
-    currentTableCode
-  );
-  try {
-    await hubConnection.invoke(
-      "UpdateCardState",
-      currentTableCode ?? "",
-      cardState
-    );
-    console.log("[SignalR] Card state broadcast sent successfully");
-  } catch (err) {
-    console.error("[SignalR] Failed to broadcast card state:", err);
-  }
-}
-
-/**
  * Broadcast a card flip to other connected clients.
  */
 function toggleCardFlipped(card: Card) {
   card.flipped = !card.flipped;
-  void broadcastCardState(card);
-}
-
-interface CardStateUpdate {
-  cardId: string;
-  x: number;
-  y: number;
-  rotation: number;
-  zIndex: number;
-  flipped: boolean;
+  broadcastCardState(card);
 }
 
 /**
  * Apply a received full card state from another client.
  */
-function applyCardStateUpdate(
-  receivedTableId: string,
-  update: CardStateUpdate
-) {
-  // Filter by table — only apply updates for our table
-  if (receivedTableId !== currentTableCode) {
-    return;
-  }
-  console.warn(
-    "[SignalR] Received card state update for table",
-    receivedTableId,
-    ":",
-    update
-  );
-  const card = cards.value.find(c => c.id === update.cardId);
-  if (!card) {
-    console.warn(
-      "[SignalR] Card not found for update:",
-      update.cardId,
-      "Available cards:",
-      cards.value.map(c => c.id)
-    );
-    return;
-  }
+function applyCardStateUpdate(update: CardState) {
+  const card = cards.value.find(item => item.id === update.cardId);
+  if (!card) return;
 
   card.x = update.x;
   card.y = update.y;
@@ -517,145 +415,162 @@ function applyCardStateUpdate(
   card.flipped = update.flipped;
   highestZIndex = Math.max(highestZIndex, update.zIndex);
 
-  const element = tableRef.value?.querySelector(
+  const element = tableRef.value?.querySelector<HTMLElement>(
     `[data-card-id="${update.cardId}"]`
-  ) as HTMLElement | undefined;
+  );
   if (element) {
     setCardPosition(element, update.x, update.y);
   }
 }
 
-/**
- * Apply a full table state received from another client or the server.
- */
-function applyTableState(state: {
-  tableId: string;
-  cards: CardStateUpdate[];
-  timestamp: string;
-}) {
-  state.cards.forEach(cardState => {
-    applyCardStateUpdate(state.tableId, cardState);
+function initialiseCardsFromSharedState() {
+  const currentDeck = deck.value;
+  const sharedCards = tableSession?.cards;
+  if (!currentDeck || !sharedCards) return;
+
+  highestZIndex = 0;
+  cards.value = currentDeck.cards.map(deckCard => {
+    const id = `${currentDeck.id}-${deckCard.id}`;
+    const state = sharedCards.get(id);
+    const card: Card = {
+      id,
+      assetUrl: deckCard.assetUrl,
+      alt: deckCard.alt,
+      x: state?.x ?? 0,
+      y: state?.y ?? 0,
+      rotation: state?.rotation ?? 0,
+      zIndex: state?.zIndex ?? 0,
+      flipped: state?.flipped ?? false
+    };
+    highestZIndex = Math.max(highestZIndex, card.zIndex);
+    return card;
   });
 }
 
-async function joinTable(tableCode: string) {
-  if (!hubConnection) return;
-
-  // Listen for updates from other clients before joining
-  hubConnection.on("ReceiveCardStateUpdate", applyCardStateUpdate);
-  hubConnection.on("ReceiveTableState", applyTableState);
-  console.warn(
-    "[SignalR] Listeners registered, connection state:",
-    hubConnection.state
-  );
-
-  // Join the table and get the current state (if any)
-  const result = await hubConnection.invoke<{
-    tableId: string;
-    deckId: string;
-    state: ReturnType<typeof buildTableState> | null;
-  }>("JoinTable", tableCode);
-  currentTableCode = result.tableId;
-  joinedTable = true;
-  activeDeckId.value = result.deckId;
-  if (!deck.value) {
+function initialiseSharedTable(deckId: string) {
+  const currentDeck = getDeckById(deckId);
+  if (!tableSession || !currentDeck) {
     throw new Error("The deck for this table is not available in this client.");
   }
-  await nextTick();
-  initialiseCards();
-  await nextTick();
-  console.warn(
-    "[SignalR] Joined table",
-    result.tableId,
-    "- existing state:",
-    result.state ? "yes" : "no"
-  );
 
-  if (result.state) {
-    // A table already exists — apply the saved card states
-    applyTableState(result.state);
-  } else {
-    // First client — randomise and broadcast the initial layout
-    randomiseCardPositions();
-    await broadcastTableState();
-  }
+  tableSession.doc.transact(() => {
+    tableSession?.metadata.set("deckId", deckId);
+    currentDeck.cards.forEach((deckCard, index) => {
+      const cardId = `${deckId}-${deckCard.id}`;
+      tableSession?.cards.set(cardId, {
+        cardId,
+        x: 0,
+        y: 0,
+        rotation: 0,
+        zIndex: index + 1,
+        flipped: false
+      });
+    });
+    tableSession?.metadata.set("ready", true);
+  });
 }
 
 onMounted(async () => {
-  console.warn(
-    "[SignalR] onMounted fired, table code:",
-    (route.params as { deck?: string }).deck
-  );
-
   const tableCode = String((route.params as { deck?: string }).deck ?? "")
     .trim()
     .toUpperCase();
-  currentTableCode = tableCode;
+  if (!/^[A-Z]{5}$/.test(tableCode)) {
+    tableError.value = "Join codes must be five letters.";
+    return;
+  }
   tableCodeLabel.value = tableCode;
-  try {
-    console.warn("[SignalR] Calling startConnection()");
-    hubConnection = await startConnection();
-    console.warn(
-      "[SignalR] startConnection() returned, state:",
-      hubConnection.state
-    );
+  tableSession = createTableSession(tableCode);
+  tableWaitController = new AbortController();
 
-    // Handle reconnection — re-join the table group after reconnect
-    hubConnection.onreconnected(connectionId => {
-      console.warn("[SignalR] Reconnected with connection ID:", connectionId);
-      if (currentTableCode) {
-        hubConnection
-          ?.invoke<{
-            tableId: string;
-            deckId: string;
-            state: ReturnType<typeof buildTableState> | null;
-          }>("JoinTable", currentTableCode)
-          .then(result => {
-            console.warn(
-              "[SignalR] Re-joined table after reconnect:",
-              currentTableCode
-            );
-            if (result.state) {
-              applyTableState(result.state);
-            }
-          })
-          .catch(err => {
-            console.error(
-              "[SignalR] Failed to re-join table after reconnect:",
-              err
-            );
-          });
+  try {
+    const requestedDeckId = String(route.query.deck ?? "");
+    await waitForRoomDiscovery(
+      tableSession.provider,
+      1_500,
+      5_000,
+      tableWaitController.signal
+    );
+    if (disposed) return;
+
+    const existingDeckId = tableSession.metadata.get("deckId");
+    if (
+      existingDeckId &&
+      requestedDeckId &&
+      existingDeckId !== requestedDeckId
+    ) {
+      throw new Error("This join code is already being used by another table.");
+    }
+
+    let createdTable = false;
+    if (tableSession.metadata.get("ready") !== true) {
+      if (requestedDeckId && getTableClientCount(tableSession.provider) === 1) {
+        initialiseSharedTable(requestedDeckId);
+        createdTable = true;
+      } else {
+        await waitForTableReady(
+          tableSession.metadata,
+          15_000,
+          tableWaitController.signal
+        );
+      }
+    }
+    if (disposed) return;
+
+    activeDeckId.value = String(tableSession.metadata.get("deckId") ?? "");
+    if (!deck.value) {
+      throw new Error(
+        "The deck for this table is not available in this client."
+      );
+    }
+
+    await nextTick();
+    if (disposed) return;
+    initialiseCardsFromSharedState();
+    await nextTick();
+    if (disposed) return;
+    cards.value.forEach(card => {
+      const element = tableRef.value?.querySelector<HTMLElement>(
+        `[data-card-id="${card.id}"]`
+      );
+      if (element) {
+        setCardPosition(element, card.x, card.y);
       }
     });
 
-    await joinTable(tableCode);
+    cardStateObserver = event => {
+      event.changes.keys.forEach((change, cardId) => {
+        if (change.action !== "delete") {
+          const state = tableSession?.cards.get(cardId);
+          if (state) applyCardStateUpdate(state);
+        }
+      });
+    };
+    tableSession.cards.observe(cardStateObserver);
+
+    if (createdTable && getTableClientCount(tableSession.provider) === 1) {
+      scatterCards();
+    }
+    initialiseDragging();
   } catch (err) {
+    if (disposed) return;
     tableError.value =
       err instanceof Error ? err.message : "Could not join this table.";
-    console.warn("SignalR table join failed:", err);
-  }
-
-  if (joinedTable) {
-    initialiseDragging();
+    console.error("Yjs table join failed:", err);
+    tableSession?.destroy();
+    tableSession = null;
   }
 });
 
 onUnmounted(() => {
+  disposed = true;
+  tableWaitController?.abort();
+  tableWaitController = null;
   interact(".table-card").unset();
-
-  // Leave the table group and clean up SignalR listeners
-  const tableCode = currentTableCode;
-  currentTableCode = null;
-  if (hubConnection) {
-    if (tableCode && joinedTable) {
-      hubConnection.invoke("LeaveTable", tableCode).catch(console.error);
-    }
-    hubConnection.off("ReceiveCardStateUpdate", applyCardStateUpdate);
-    hubConnection.off("ReceiveTableState", applyTableState);
-    stopConnection();
-    hubConnection = null;
+  if (tableSession && cardStateObserver) {
+    tableSession.cards.unobserve(cardStateObserver);
   }
-  joinedTable = false;
+  tableSession?.destroy();
+  tableSession = null;
 });
 </script>
 

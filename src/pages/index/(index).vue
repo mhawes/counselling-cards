@@ -76,7 +76,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { availableDecks } from "@/decks";
-import { startConnection } from "@/services/signalr";
+import { generateTableCode } from "@/services/yjs";
 
 const router = useRouter();
 const joinCode = ref("");
@@ -97,9 +97,8 @@ async function createTable(deckId: string) {
   creatingTable.value = true;
   createError.value = "";
   try {
-    const connection = await startConnection();
-    const code = await connection.invoke<string>("CreateTable", deckId);
-    await router.push(`/table/${code}`);
+    const code = generateTableCode();
+    await router.push({ path: `/table/${code}`, query: { deck: deckId } });
   } catch (err) {
     console.error("Failed to create table:", err);
     createError.value = "Could not create a table. Please try again.";
