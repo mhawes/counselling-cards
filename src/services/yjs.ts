@@ -8,6 +8,9 @@ export interface CardState {
   rotation: number;
   zIndex: number;
   flipped: boolean;
+  highlighted?: boolean;
+  expanded?: boolean;
+  scale?: number;
 }
 
 export interface TableSession {

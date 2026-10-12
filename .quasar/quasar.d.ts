@@ -33,9 +33,10 @@ interface ImportMetaEnv {
   readonly DISPLAY?: string;
   readonly DriverData?: string;
   readonly EDITOR?: string;
-  readonly EFC_1836_1592913036?: number;
-  readonly EFC_1836_2946480783?: number;
-  readonly EFC_1836_4126798990?: number;
+  readonly EFC_26000_1592913036?: number;
+  readonly EFC_26000_2946480783?: number;
+  readonly EFC_26000_344590478?: number;
+  readonly EFC_26000_4126798990?: number;
   readonly EXEPATH?: string;
   readonly GIT_ASKPASS?: string;
   readonly HOME?: string;
@@ -81,7 +82,6 @@ interface ImportMetaEnv {
   readonly NUMBER_OF_PROCESSORS?: number;
   readonly NVM_HOME?: string;
   readonly OculusBase?: string;
-  readonly OLDPWD?: string;
   readonly OneDrive?: string;
   readonly OneDriveConsumer?: string;
   readonly ORIGINAL_PATH?: string;

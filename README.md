@@ -38,6 +38,8 @@ The Worker stores no table content; it relays WebRTC signaling messages, while c
 
 Run `npm run test:signaling` to exercise the worker's room relay behavior.
 
+Worker logs are structured JSON. Use `npx wrangler@latest tail counselling-cards-signaling` or the Worker **Logs** view in Cloudflare, and look for `websocket-accepted`, `room-subscribed`, `message-published`, `ping-received`, `socket-closed`, and `socket-error`. Logs include room codes and message types, but never signaling payload contents.
+
 ## GitHub Pages
 
 The `Deploy to GitHub Pages` workflow builds and publishes the app on pushes to `master` and can also be started manually. It configures the project-page asset base for this repository (`/counselling-cards/`). Enable GitHub Pages with **GitHub Actions** as the build and deployment source in repository settings.

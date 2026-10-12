@@ -14,7 +14,12 @@
         />
       </div>
     </div>
-    <div v-else ref="tableRef" class="table">
+    <div
+      v-else
+      ref="tableRef"
+      class="table"
+      :class="{ 'has-expanded-card': expandedCard }"
+    >
       <div
         v-for="card in cards"
         :key="card.id"
@@ -22,12 +27,14 @@
         :data-card-id="card.id"
         :data-x="card.x"
         :data-y="card.y"
+        :class="{ 'is-expanded': card.expanded }"
         :style="{
-          width: `calc(${deck.cardWidth}px * var(--card-scale, 1))`,
-          height: `calc(${deck.cardHeight}px * var(--card-scale, 1))`,
+          width: `calc(${deck.cardWidth}px * var(--card-scale, 1) * ${card.scale})`,
+          height: `calc(${deck.cardHeight}px * var(--card-scale, 1) * ${card.scale})`,
           zIndex: card.zIndex
         }"
         @dblclick="toggleCardFlipped(card)"
+        @click="handleCardClick($event, card)"
       >
         <!--
           interact.js controls the outer element's position.
@@ -39,7 +46,10 @@
             '--card-rotation': `${card.rotation}deg`
           }"
         >
-          <div class="card-inner" :class="{ flipped: card.flipped }">
+          <div
+            class="card-inner"
+            :class="{ flipped: card.flipped, highlighted: card.highlighted }"
+          >
             <div class="card-face card-front">
               <img
                 v-if="card.assetUrl"
@@ -61,6 +71,57 @@
             </div>
           </div>
         </div>
+        <div v-if="card.expanded && !card.flipped" class="expanded-card-alt">
+          {{ card.alt || `Card ${card.id}` }}
+        </div>
+        <div class="card-action-buttons">
+          <q-btn
+            v-if="card.expanded && card.flipped"
+            round
+            dense
+            unelevated
+            size="md"
+            color="white"
+            text-color="dark"
+            icon="flip"
+            aria-label="Flip card"
+            @click.stop="toggleCardFlipped(card)"
+          >
+            <q-tooltip>Flip card</q-tooltip>
+          </q-btn>
+          <q-btn
+            round
+            dense
+            unelevated
+            :size="card.expanded ? 'md' : 'xs'"
+            color="white"
+            text-color="dark"
+            :icon="card.expanded ? 'close_fullscreen' : 'open_in_full'"
+            :aria-label="card.expanded ? 'Return card to table' : 'Expand card'"
+            @click.stop="toggleCardExpanded(card)"
+          >
+            <q-tooltip>
+              {{ card.expanded ? "Return card to table" : "Expand card" }}
+            </q-tooltip>
+          </q-btn>
+          <q-btn
+            round
+            dense
+            unelevated
+            :size="card.expanded ? 'md' : 'xs'"
+            color="white"
+            text-color="dark"
+            :icon="card.highlighted ? 'star' : 'star_outline'"
+            :aria-label="
+              card.highlighted ? 'Remove card highlight' : 'Highlight card'
+            "
+            @click.stop="toggleCardHighlight(card)"
+          >
+            <q-tooltip>
+              {{ card.highlighted ? "Remove highlight" : "Highlight card" }}
+            </q-tooltip>
+          </q-btn>
+        </div>
       </div>
     </div>
     <q-page-sticky
@@ -69,26 +130,84 @@
       position="bottom-left"
       :offset="[18, 18]"
     >
-      <q-fab
-        color="primary"
-        icon="more_vert"
-        direction="up"
-        vertical-actions-align="left"
-      >
-        <q-fab-action
-          color="secondary"
-          icon="shuffle"
-          label="Shuffle and Stack Deck"
-          @click="shuffleAndStackDeck"
-        />
-        <q-fab-action
-          color="secondary"
-          icon="scatter_plot"
-          label="Scatter Cards"
-          @click="scatterCards"
-        />
-      </q-fab>
+      <div class="column items-start">
+        <q-fab
+          color="primary"
+          icon="more_vert"
+          direction="up"
+          vertical-actions-align="left"
+        >
+          <q-fab-action
+            color="primary"
+            icon="collections"
+            label="Collect Highlighted Cards"
+            :disable="!hasHighlightedCards"
+            @click="collectHighlightedCards"
+          />
+          <q-fab-action
+            color="secondary"
+            icon="shuffle"
+            label="Shuffle and Stack Deck"
+            @click="shuffleAndStackDeck"
+          />
+          <q-fab-action
+            color="secondary"
+            icon="scatter_plot"
+            label="Scatter Cards"
+            @click="scatterCards"
+          />
+          <q-fab-action
+            color="accent"
+            icon="help_outline"
+            label="Help"
+            @click="helpDialogOpen = true"
+          />
+        </q-fab>
+      </div>
     </q-page-sticky>
+    <q-dialog v-model="helpDialogOpen">
+      <q-card class="help-dialog">
+        <q-card-section>
+          <div class="text-h6">How to use the card table</div>
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <ul class="q-my-none q-pl-md">
+            <li><strong>Drag</strong> a card to move it around the table.</li>
+            <li>
+              <strong>Double-click</strong> a card to flip it. When an expanded
+              card is face down, use its flip button to reveal it.
+            </li>
+            <li>
+              Use the card's <strong>expand button</strong> to enlarge it above
+              the table and dim the background. Click the enlarged card or its
+              button to return it. On desktop, hover over a card to reveal its
+              action buttons.
+            </li>
+            <li>
+              Use the card's <strong>highlight button</strong> to toggle its
+              highlight. Shift-click also toggles the highlight.
+            </li>
+            <li>
+              Use <strong>Collect Highlighted Cards</strong> to show highlighted
+              cards together in the center and stack the rest at the bottom
+              right.
+            </li>
+            <li>
+              Use <strong>Shuffle and Stack Deck</strong> to shuffle and stack
+              cards face down, or <strong>Scatter Cards</strong> to spread them
+              face up.
+            </li>
+          </ul>
+          <div class="q-mt-md">
+            Card positions, flips, highlights, and layouts are shared with
+            everyone at this table.
+          </div>
+        </q-card-section>
+        <q-card-actions align="right">
+          <q-btn v-close-popup flat label="Close" color="primary" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
     <q-page-sticky v-if="deck" position="top-right" :offset="[18, 18]">
       <q-chip color="white" text-color="primary" icon="group">
         Join code: <strong class="q-ml-xs">{{ tableCodeLabel }}</strong>
@@ -129,6 +248,15 @@ interface Card {
 
   // Whether the card is flipped to show its back
   flipped: boolean;
+
+  // Whether the card has a shared highlight
+  highlighted: boolean;
+
+  // Whether the card is shown enlarged above the table
+  expanded: boolean;
+
+  // Relative size used to fit a collected layout on the table
+  scale: number;
 }
 
 const route = useRoute();
@@ -136,6 +264,7 @@ const tableRef = ref<HTMLElement | null>(null);
 const tableError = ref("");
 const activeDeckId = ref<string | null>(null);
 const tableCodeLabel = ref("");
+const helpDialogOpen = ref(false);
 
 let highestZIndex = 0;
 
@@ -144,6 +273,10 @@ const deck = computed<Deck | undefined>(() => {
 });
 
 const cards = ref<Card[]>([]);
+const expandedCard = computed(() => cards.value.find(card => card.expanded));
+const hasHighlightedCards = computed(() =>
+  cards.value.some(card => card.highlighted)
+);
 let tableSession: TableSession | null = null;
 let disposed = false;
 let tableWaitController: AbortController | null = null;
@@ -168,10 +301,13 @@ function randomCardRotation() {
 }
 
 function getRenderedCardSize(table: HTMLElement, currentDeck: Deck) {
-  const cardElement = table.querySelector<HTMLElement>(".table-card");
+  const baseScale =
+    Number.parseFloat(
+      getComputedStyle(table).getPropertyValue("--card-scale")
+    ) || 1;
   return {
-    width: cardElement?.offsetWidth || currentDeck.cardWidth,
-    height: cardElement?.offsetHeight || currentDeck.cardHeight
+    width: currentDeck.cardWidth * baseScale,
+    height: currentDeck.cardHeight * baseScale
   };
 }
 
@@ -246,6 +382,7 @@ function initialiseDragging() {
       distance: 10,
       interval: 30
     },
+    ignoreFrom: ".card-action-buttons",
 
     listeners: {
       start(event) {
@@ -254,19 +391,23 @@ function initialiseDragging() {
 
         const card = cards.value.find(item => item.id === cardId);
 
-        if (card) {
-          highestZIndex = Math.max(
-            highestZIndex,
-            ...cards.value.map(item => item.zIndex)
-          );
-          card.zIndex = ++highestZIndex;
-        }
+        if (!card || card.expanded) return;
+
+        highestZIndex = Math.max(
+          highestZIndex,
+          ...cards.value.map(item => item.zIndex)
+        );
+        card.zIndex = ++highestZIndex;
 
         element.classList.add("is-dragging");
       },
 
       move(event) {
         const element = event.target as HTMLElement;
+        const card = cards.value.find(
+          item => item.id === element.dataset.cardId
+        );
+        if (!card || card.expanded) return;
 
         const currentX = parseFloat(element.dataset.x || "0");
 
@@ -286,7 +427,7 @@ function initialiseDragging() {
 
         const card = cards.value.find(item => item.id === cardId);
 
-        if (!card) {
+        if (!card || card.expanded) {
           return;
         }
 
@@ -314,7 +455,10 @@ function toCardState(card: Card): CardState {
     y: card.y,
     rotation: card.rotation,
     zIndex: card.zIndex,
-    flipped: card.flipped
+    flipped: card.flipped,
+    highlighted: card.highlighted,
+    expanded: card.expanded,
+    scale: card.scale
   };
 }
 
@@ -372,6 +516,9 @@ function shuffleAndStackDeck() {
     card.y = y + offset;
     card.zIndex = index + 1;
     card.flipped = true;
+    card.highlighted = false;
+    card.expanded = false;
+    card.scale = 1;
 
     const element = table.querySelector<HTMLElement>(
       `[data-card-id="${card.id}"]`
@@ -389,7 +536,115 @@ function scatterCards() {
   randomiseCardPositions();
   cards.value.forEach(card => {
     card.flipped = false;
+    card.highlighted = false;
+    card.expanded = false;
+    card.scale = 1;
   });
+  void broadcastTableState();
+}
+
+function collectHighlightedCards() {
+  const table = tableRef.value;
+  const currentDeck = deck.value;
+  if (!table || !currentDeck) return;
+
+  const highlightedCards = cards.value.filter(card => card.highlighted);
+  if (highlightedCards.length === 0) return;
+
+  const baseScale =
+    Number.parseFloat(
+      getComputedStyle(table).getPropertyValue("--card-scale")
+    ) || 1;
+  const cardWidth = currentDeck.cardWidth * baseScale;
+  const cardHeight = currentDeck.cardHeight * baseScale;
+  const gap = 20 * baseScale;
+  const margin = 24;
+  const availableWidth = Math.max(1, table.clientWidth - margin * 2);
+  const availableHeight = Math.max(1, table.clientHeight - margin * 2);
+  let layout = {
+    columns: 1,
+    rows: highlightedCards.length,
+    gap,
+    scale: 0
+  };
+
+  for (let columns = 1; columns <= highlightedCards.length; columns++) {
+    const rows = Math.ceil(highlightedCards.length / columns);
+    const layoutGap = Math.min(
+      gap,
+      columns > 1 ? availableWidth / (columns - 1) / 2 : gap,
+      rows > 1 ? availableHeight / (rows - 1) / 2 : gap
+    );
+    const scale = Math.min(
+      1,
+      (availableWidth - layoutGap * (columns - 1)) / (cardWidth * columns),
+      (availableHeight - layoutGap * (rows - 1)) / (cardHeight * rows)
+    );
+    if (scale > layout.scale) {
+      layout = { columns, rows, gap: layoutGap, scale };
+    }
+  }
+
+  const displayedWidth = cardWidth * layout.scale;
+  const displayedHeight = cardHeight * layout.scale;
+  const gridWidth =
+    layout.columns * displayedWidth + (layout.columns - 1) * layout.gap;
+  const gridHeight =
+    layout.rows * displayedHeight + (layout.rows - 1) * layout.gap;
+  const startX = (table.clientWidth - gridWidth) / 2;
+  const startY = (table.clientHeight - gridHeight) / 2;
+  const remainingCards = cards.value.filter(card => !card.highlighted);
+
+  for (let i = remainingCards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [remainingCards[i], remainingCards[j]] = [
+      remainingCards[j]!,
+      remainingCards[i]!
+    ];
+  }
+
+  const stackOffset = Math.min(
+    8 * baseScale,
+    Math.max(0, table.clientWidth - cardWidth - margin),
+    Math.max(0, table.clientHeight - cardHeight - margin)
+  );
+  const stackX = Math.max(
+    0,
+    table.clientWidth - cardWidth - margin - stackOffset
+  );
+  const stackY = Math.max(
+    0,
+    table.clientHeight - cardHeight - margin - stackOffset
+  );
+
+  remainingCards.forEach((card, index) => {
+    const offset =
+      remainingCards.length > 1
+        ? (index / (remainingCards.length - 1)) * stackOffset
+        : 0;
+    card.x = stackX + offset;
+    card.y = stackY + offset;
+    card.rotation = 0;
+    card.zIndex = index + 1;
+    card.flipped = true;
+    card.expanded = false;
+    card.scale = 1;
+  });
+
+  highlightedCards.forEach((card, index) => {
+    card.x = startX + (index % layout.columns) * (displayedWidth + layout.gap);
+    card.y =
+      startY +
+      Math.floor(index / layout.columns) * (displayedHeight + layout.gap);
+    card.rotation = 0;
+    card.zIndex = remainingCards.length + index + 1;
+    card.flipped = false;
+    card.expanded = false;
+    card.highlighted = false;
+    card.scale = layout.scale;
+  });
+
+  highestZIndex = cards.value.length;
   void broadcastTableState();
 }
 
@@ -399,6 +654,38 @@ function scatterCards() {
 function toggleCardFlipped(card: Card) {
   card.flipped = !card.flipped;
   broadcastCardState(card);
+}
+
+function toggleCardExpanded(card: Card) {
+  const expanded = !card.expanded;
+  cards.value.forEach(item => {
+    item.expanded = expanded && item.id === card.id;
+  });
+  broadcastTableState();
+}
+
+function toggleCardHighlight(card: Card) {
+  card.highlighted = !card.highlighted;
+  card.scale = 1;
+  broadcastCardState(card);
+}
+
+function handleCardClick(event: MouseEvent, card: Card) {
+  if (event.ctrlKey) {
+    event.preventDefault();
+    toggleCardExpanded(card);
+    return;
+  }
+
+  if (card.expanded) {
+    card.expanded = false;
+    broadcastCardState(card);
+    return;
+  }
+
+  if (!event.shiftKey) return;
+
+  toggleCardHighlight(card);
 }
 
 /**
@@ -413,6 +700,9 @@ function applyCardStateUpdate(update: CardState) {
   card.rotation = update.rotation;
   card.zIndex = update.zIndex;
   card.flipped = update.flipped;
+  card.highlighted = update.highlighted ?? false;
+  card.expanded = update.expanded ?? false;
+  card.scale = update.scale ?? 1;
   highestZIndex = Math.max(highestZIndex, update.zIndex);
 
   const element = tableRef.value?.querySelector<HTMLElement>(
@@ -440,7 +730,10 @@ function initialiseCardsFromSharedState() {
       y: state?.y ?? 0,
       rotation: state?.rotation ?? 0,
       zIndex: state?.zIndex ?? 0,
-      flipped: state?.flipped ?? false
+      flipped: state?.flipped ?? false,
+      highlighted: state?.highlighted ?? false,
+      expanded: state?.expanded ?? false,
+      scale: state?.scale ?? 1
     };
     highestZIndex = Math.max(highestZIndex, card.zIndex);
     return card;
@@ -463,7 +756,10 @@ function initialiseSharedTable(deckId: string) {
         y: 0,
         rotation: 0,
         zIndex: index + 1,
-        flipped: false
+        flipped: false,
+        highlighted: false,
+        expanded: false,
+        scale: 1
       });
     });
     tableSession?.metadata.set("ready", true);
@@ -596,6 +892,17 @@ onUnmounted(() => {
   background: radial-gradient(circle at center, #e8dcc8 0%, #d9c8ad 100%);
 }
 
+.table.has-expanded-card::after {
+  position: absolute;
+  z-index: 1000;
+  inset: 0;
+
+  background: rgb(0 0 0 / 65%);
+
+  content: "";
+  pointer-events: none;
+}
+
 @media (max-width: 600px) {
   .table {
     --card-scale: 0.5;
@@ -617,6 +924,10 @@ onUnmounted(() => {
   text-align: center;
 
   color: #555;
+}
+
+.help-dialog {
+  width: min(560px, 90vw);
 }
 
 /*
@@ -644,6 +955,72 @@ onUnmounted(() => {
 
 .table-card.is-dragging {
   cursor: grabbing;
+}
+
+.card-action-buttons {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  right: 3px;
+
+  display: flex;
+  gap: 3px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .card-action-buttons {
+    visibility: hidden;
+    opacity: 0;
+
+    transition: opacity 120ms ease;
+  }
+
+  .table-card:hover .card-action-buttons,
+  .table-card:focus-within .card-action-buttons {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .table-card.is-expanded .card-action-buttons {
+    visibility: visible;
+    opacity: 1;
+  }
+}
+
+.table-card.is-expanded {
+  position: fixed;
+  z-index: 1001 !important;
+  top: 50%;
+  left: 50%;
+
+  transform: translate(-50%, -50%) !important;
+  cursor: zoom-out;
+}
+
+.table-card.is-expanded .card-visual {
+  transform: scale(2.5) rotate(var(--card-rotation));
+}
+
+.expanded-card-alt {
+  position: absolute;
+  bottom: calc(175% + 12px);
+  left: 50%;
+
+  width: min(80vw, 600px);
+  transform: translateX(-50%);
+  color: white;
+  font-size: clamp(14px, 2.5vw, 24px);
+  font-weight: 600;
+  text-align: center;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
+}
+
+.table-card.is-expanded .card-action-buttons {
+  top: calc(175% + 12px);
+  right: auto;
+  left: 50%;
+
+  transform: translateX(-50%);
 }
 
 /*
@@ -693,6 +1070,16 @@ onUnmounted(() => {
 
 .card-inner.flipped {
   transform: rotateY(180deg);
+}
+
+.card-inner.highlighted {
+  outline: 3px solid white;
+  outline-offset: 1px;
+  box-shadow:
+    0 4px 8px rgb(0 0 0 / 12%),
+    0 10px 24px rgb(0 0 0 / 15%),
+    0 0 8px 3px rgba(16, 59, 255, 0.95),
+    0 0 16px 6px rgba(1, 132, 255, 0.7);
 }
 
 .card-face {
