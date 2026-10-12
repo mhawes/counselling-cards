@@ -1071,9 +1071,7 @@ onUnmounted(() => {
 
   background: white;
 
-  box-shadow:
-    0 4px 8px rgb(0 0 0 / 12%),
-    0 10px 24px rgb(0 0 0 / 15%);
+  box-shadow: none;
 
   transition:
     box-shadow 120ms ease,
@@ -1088,7 +1086,7 @@ onUnmounted(() => {
 }
 
 .card-inner.highlighted {
-  outline: 3px solid white;
+  outline: 3px solid rgb(82, 108, 255);
   outline-offset: 1px;
   box-shadow:
     0 4px 8px rgb(0 0 0 / 12%),
@@ -1126,6 +1124,14 @@ onUnmounted(() => {
   box-shadow:
     0 6px 12px rgb(0 0 0 / 14%),
     0 14px 28px rgb(0 0 0 / 18%);
+}
+
+.table-card:hover .card-inner.highlighted {
+  box-shadow:
+    0 6px 12px rgb(0 0 0 / 14%),
+    0 14px 28px rgb(0 0 0 / 18%),
+    0 0 8px 3px rgba(16, 59, 255, 0.95),
+    0 0 16px 6px rgba(1, 132, 255, 0.7);
 }
 
 .table-card.is-dragging .card-inner {
