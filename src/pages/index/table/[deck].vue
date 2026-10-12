@@ -74,21 +74,22 @@
         <div v-if="card.expanded && !card.flipped" class="expanded-card-alt">
           {{ card.alt || `Card ${card.id}` }}
         </div>
+        <q-btn
+          v-if="card.expanded && card.flipped"
+          class="expanded-flip-button"
+          round
+          unelevated
+          size="xl"
+          color="dark"
+          text-color="white"
+          icon="flip"
+          :ripple="false"
+          aria-label="Flip card"
+          @click.stop="toggleCardFlipped(card)"
+        >
+          <q-tooltip>Flip card</q-tooltip>
+        </q-btn>
         <div class="card-action-buttons">
-          <q-btn
-            v-if="card.expanded && card.flipped"
-            round
-            dense
-            unelevated
-            size="md"
-            color="white"
-            text-color="dark"
-            icon="flip"
-            aria-label="Flip card"
-            @click.stop="toggleCardFlipped(card)"
-          >
-            <q-tooltip>Flip card</q-tooltip>
-          </q-btn>
           <q-btn
             round
             dense
@@ -1013,6 +1014,20 @@ onUnmounted(() => {
   font-weight: 600;
   text-align: center;
   text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
+}
+
+.expanded-flip-button {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+
+  width: 120px;
+  height: 120px;
+
+  background: rgb(0 0 0 / 30%) !important;
+  font-size: 48px;
+  transform: translate(-50%, -50%);
 }
 
 .table-card.is-expanded .card-action-buttons {
