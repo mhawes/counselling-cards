@@ -48,8 +48,8 @@ const archetypeCardDefinitions = [
 export const archetypeCardsDeck: Deck = {
   id: "archetype-cards",
   name: "Archetype Cards",
-  cardWidth: 166,
-  cardHeight: 288,
+  cardWidth: 185,
+  cardHeight: 295,
   backImageUrl: getArchetypeCardImage("back.png"),
   cards: archetypeCardDefinitions.map(({ id, filename, alt }) => ({
     id,
