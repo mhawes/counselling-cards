@@ -17,7 +17,6 @@ declare const __VUE_OPTIONS_API__: boolean;
 // Automatically generated from process.env & dotenv files & build.define & build.defineEnv;
 // Backend-only are not available in client code, so they are marked as optional
 interface ImportMetaEnv {
-  readonly VITE_YJS_SIGNALING_URL: string;
   readonly ACLOCAL_PATH?: string;
   readonly ALLUSERSPROFILE?: string;
   readonly APPDATA?: string;

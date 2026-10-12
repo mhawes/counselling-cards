@@ -1,5 +1,5 @@
 import * as Y from "yjs";
-import { WebrtcProvider } from "y-webrtc";
+import { joinRoom, selfId } from "trystero/nostr";
 
 export interface CardState {
   cardId: string;
@@ -15,13 +15,26 @@ export interface CardState {
 
 export interface TableSession {
   doc: Y.Doc;
-  provider: WebrtcProvider;
+  provider: TablePeerProvider;
   metadata: Y.Map<unknown>;
   cards: Y.Map<CardState>;
   destroy: () => void;
 }
 
+type ProviderEventListener = () => void;
+
+interface TablePeerProvider {
+  awareness: {
+    getStates: () => Map<string, unknown>;
+    on: (event: "change", listener: ProviderEventListener) => void;
+    off: (event: "change", listener: ProviderEventListener) => void;
+  };
+  on: (event: "peers", listener: ProviderEventListener) => void;
+  off: (event: "peers", listener: ProviderEventListener) => void;
+}
+
 const JOIN_CODE_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const APP_ID = "mhawes-counselling-cards";
 
 export function generateTableCode(): string {
   const randomValues = crypto.getRandomValues(new Uint8Array(5));
@@ -31,46 +44,88 @@ export function generateTableCode(): string {
   ).join("");
 }
 
-function getSignalingServers(tableCode: string): string[] | undefined {
-  const configuredUrl = import.meta.env.VITE_YJS_SIGNALING_URL?.trim();
-  if (!configuredUrl) {
-    return undefined;
-  }
-
-  const signalingUrl = new URL(configuredUrl);
-  if (signalingUrl.protocol !== "wss:" && signalingUrl.protocol !== "ws:") {
-    throw new Error("The Yjs signaling URL must use ws:// or wss://.");
-  }
-  signalingUrl.pathname = `${signalingUrl.pathname.replace(/\/+$/, "")}/${encodeURIComponent(tableCode)}`;
-  return [signalingUrl.toString()];
-}
-
 export function createTableSession(tableCode: string): TableSession {
   const doc = new Y.Doc();
-  const signaling = getSignalingServers(tableCode);
-  const provider = new WebrtcProvider(
-    tableCode,
-    doc,
-    signaling ? { signaling } : undefined
-  );
+  const room = joinRoom({ appId: APP_ID }, tableCode, {
+    onJoinError: details => {
+      console.error("Nostr peer connection failed:", details);
+    }
+  });
+  const peerListeners = new Set<ProviderEventListener>();
+  const awarenessListeners = new Set<ProviderEventListener>();
+  const remoteUpdateOrigin = Symbol("remote-yjs-update");
+  const updateAction = room.makeAction<Uint8Array>("yjs-document-update");
+  let destroyed = false;
+
+  const notifyPeerChange = () => {
+    peerListeners.forEach(listener => listener());
+    awarenessListeners.forEach(listener => listener());
+  };
+
+  const provider: TablePeerProvider = {
+    awareness: {
+      getStates: () =>
+        new Map([
+          [selfId, {}],
+          ...Object.keys(room.getPeers()).map(peerId => [peerId, {}] as const)
+        ]),
+      on: (_event, listener) => awarenessListeners.add(listener),
+      off: (_event, listener) => awarenessListeners.delete(listener)
+    },
+    on: (_event, listener) => peerListeners.add(listener),
+    off: (_event, listener) => peerListeners.delete(listener)
+  };
+
+  const sendUpdate = (update: Uint8Array, peerId?: string) => {
+    void updateAction
+      .send(update, peerId ? { target: peerId } : undefined)
+      .catch(error => {
+        console.error("Failed to send Yjs update over Trystero:", error);
+      });
+  };
+
+  const onDocumentUpdate = (update: Uint8Array, origin: unknown) => {
+    if (origin !== remoteUpdateOrigin) {
+      sendUpdate(update);
+    }
+  };
+  doc.on("update", onDocumentUpdate);
+
+  updateAction.onMessage = update => {
+    Y.applyUpdate(doc, update, remoteUpdateOrigin);
+  };
+
+  room.onPeerJoin = peerId => {
+    notifyPeerChange();
+    sendUpdate(Y.encodeStateAsUpdate(doc), peerId);
+  };
+  room.onPeerLeave = notifyPeerChange;
+
   return {
     doc,
     provider,
     metadata: doc.getMap("table"),
     cards: doc.getMap<CardState>("cards"),
     destroy() {
-      provider.destroy();
+      if (destroyed) return;
+      destroyed = true;
+      room.onPeerJoin = null;
+      room.onPeerLeave = null;
+      doc.off("update", onDocumentUpdate);
+      void room.leave().catch(error => {
+        console.error("Failed to leave Trystero room:", error);
+      });
       doc.destroy();
     }
   };
 }
 
-export function getTableClientCount(provider: WebrtcProvider): number {
+export function getTableClientCount(provider: TablePeerProvider): number {
   return provider.awareness.getStates().size;
 }
 
 export function waitForRoomDiscovery(
-  provider: WebrtcProvider,
+  provider: TablePeerProvider,
   quietMs = 1_500,
   maxWaitMs = 5_000,
   signal?: AbortSignal
