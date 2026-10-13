@@ -1,10 +1,31 @@
 <template>
   <q-page class="flex flex-center deck-selection-page">
     <div class="deck-selection-container">
-      <div class="text-h4 text-center q-mb-lg">Choose a Deck</div>
+      <div class="text-h4 text-center q-mb-sm">Choose a Table</div>
+      <div class="text-center q-mb-lg">
+        Create a shared card table or a flexible timeline.
+      </div>
       <div v-if="createError" class="text-negative text-center q-mb-md">
         {{ createError }}
       </div>
+      <q-card class="timeline-card q-mb-lg" flat bordered>
+        <q-card-section class="text-center">
+          <div class="text-h6 text-weight-bold">Timeline</div>
+          <div class="text-caption q-mt-sm">
+            Arrange tokens and editable post-it notes along a shared timeline.
+          </div>
+        </q-card-section>
+        <q-card-actions align="center">
+          <q-btn
+            color="secondary"
+            label="Create Timeline"
+            no-caps
+            :loading="creatingTable"
+            @click="createTable('timeline')"
+          />
+        </q-card-actions>
+      </q-card>
+      <div class="text-h5 text-center q-mb-md">Card Tables</div>
       <div class="deck-grid">
         <q-card
           v-for="deck in availableDecks"
@@ -28,7 +49,7 @@
               label="Create Table"
               no-caps
               :loading="creatingTable"
-              @click="createTable(deck.id)"
+              @click="createTable('cards', deck.id)"
             />
           </q-card-actions>
         </q-card>
@@ -93,12 +114,14 @@ function normalizeJoinCode(value: string | number | null) {
   joinError.value = "";
 }
 
-async function createTable(deckId: string) {
+async function createTable(type: "cards" | "timeline", deckId?: string) {
   creatingTable.value = true;
   createError.value = "";
   try {
     const code = generateTableCode();
-    await router.push({ path: `/table/${code}`, query: { deck: deckId } });
+    const query =
+      type === "cards" && deckId ? { deck: deckId } : { type: "timeline" };
+    await router.push({ path: `/table/${code}`, query });
   } catch (err) {
     console.error("Failed to create table:", err);
     createError.value = "Could not create a table. Please try again.";
@@ -133,6 +156,11 @@ function joinTable() {
 
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 16px;
+}
+
+.timeline-card {
+  color: white;
+  background: linear-gradient(135deg, #547b65 0%, #315345 100%);
 }
 
 .deck-card {

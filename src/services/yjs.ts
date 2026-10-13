@@ -13,11 +13,22 @@ export interface CardState {
   scale?: number;
 }
 
+export interface TimelineItemState {
+  itemId: string;
+  kind: "token" | "note";
+  x: number;
+  y: number;
+  zIndex: number;
+  text: string;
+  color: string;
+}
+
 export interface TableSession {
   doc: Y.Doc;
   provider: TablePeerProvider;
   metadata: Y.Map<unknown>;
   cards: Y.Map<CardState>;
+  timelineItems: Y.Map<TimelineItemState>;
   destroy: () => void;
 }
 
@@ -106,6 +117,7 @@ export function createTableSession(tableCode: string): TableSession {
     provider,
     metadata: doc.getMap("table"),
     cards: doc.getMap<CardState>("cards"),
+    timelineItems: doc.getMap<TimelineItemState>("timelineItems"),
     destroy() {
       if (destroyed) return;
       destroyed = true;

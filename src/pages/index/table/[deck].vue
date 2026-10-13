@@ -1,6 +1,11 @@
 <template>
   <q-page class="table-page">
-    <div v-if="!deck" class="table no-deck">
+    <TimelineTable
+      v-if="isTimeline && timelineItems"
+      :shared-items="timelineItems"
+      :table-code="tableCodeLabel"
+    />
+    <div v-else-if="!deck" class="table no-deck">
       <div class="no-deck-message">
         <div class="text-h5">
           {{ tableError || "Joining table..." }}
@@ -218,11 +223,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef
+} from "vue";
 import { useRoute } from "vue-router";
 import interact from "interactjs";
 import { getDeckById, type Deck } from "@/decks";
 import type { YMapEvent } from "yjs";
+import TimelineTable from "@/components/TimelineTable.vue";
 import {
   createTableSession,
   getTableClientCount,
@@ -264,14 +277,19 @@ const route = useRoute();
 const tableRef = ref<HTMLElement | null>(null);
 const tableError = ref("");
 const activeDeckId = ref<string | null>(null);
+const activeTableType = ref<"cards" | "timeline" | null>(null);
+const timelineItems = shallowRef<TableSession["timelineItems"] | null>(null);
 const tableCodeLabel = ref("");
 const helpDialogOpen = ref(false);
 
 let highestZIndex = 0;
 
 const deck = computed<Deck | undefined>(() => {
-  return activeDeckId.value ? getDeckById(activeDeckId.value) : undefined;
+  return activeTableType.value === "cards" && activeDeckId.value
+    ? getDeckById(activeDeckId.value)
+    : undefined;
 });
+const isTimeline = computed(() => activeTableType.value === "timeline");
 
 const cards = ref<Card[]>([]);
 const expandedCard = computed(() => cards.value.find(card => card.expanded));
@@ -748,6 +766,7 @@ function initialiseSharedTable(deckId: string) {
   }
 
   tableSession.doc.transact(() => {
+    tableSession?.metadata.set("tableType", "cards");
     tableSession?.metadata.set("deckId", deckId);
     currentDeck.cards.forEach((deckCard, index) => {
       const cardId = `${deckId}-${deckCard.id}`;
@@ -767,6 +786,17 @@ function initialiseSharedTable(deckId: string) {
   });
 }
 
+function initialiseSharedTimeline() {
+  if (!tableSession) {
+    throw new Error("The timeline table could not be initialised.");
+  }
+
+  tableSession.doc.transact(() => {
+    tableSession?.metadata.set("tableType", "timeline");
+    tableSession?.metadata.set("ready", true);
+  });
+}
+
 onMounted(async () => {
   const tableCode = String((route.params as { deck?: string }).deck ?? "")
     .trim()
@@ -781,6 +811,12 @@ onMounted(async () => {
 
   try {
     const requestedDeckId = String(route.query.deck ?? "");
+    const requestedTableType =
+      route.query.type === "timeline"
+        ? "timeline"
+        : requestedDeckId
+          ? "cards"
+          : null;
     await waitForRoomDiscovery(
       tableSession.provider,
       1_500,
@@ -790,6 +826,16 @@ onMounted(async () => {
     if (disposed) return;
 
     const existingDeckId = tableSession.metadata.get("deckId");
+    const existingTableType =
+      tableSession.metadata.get("tableType") ??
+      (existingDeckId ? "cards" : undefined);
+    if (
+      existingTableType &&
+      requestedTableType &&
+      existingTableType !== requestedTableType
+    ) {
+      throw new Error("This join code is already being used by another table.");
+    }
     if (
       existingDeckId &&
       requestedDeckId &&
@@ -800,8 +846,17 @@ onMounted(async () => {
 
     let createdTable = false;
     if (tableSession.metadata.get("ready") !== true) {
-      if (requestedDeckId && getTableClientCount(tableSession.provider) === 1) {
-        initialiseSharedTable(requestedDeckId);
+      if (
+        requestedTableType &&
+        getTableClientCount(tableSession.provider) === 1
+      ) {
+        if (requestedTableType === "timeline") {
+          initialiseSharedTimeline();
+        } else if (requestedDeckId) {
+          initialiseSharedTable(requestedDeckId);
+        } else {
+          throw new Error("Choose a deck to create a card table.");
+        }
         createdTable = true;
       } else {
         await waitForTableReady(
@@ -813,7 +868,18 @@ onMounted(async () => {
     }
     if (disposed) return;
 
+    const tableType =
+      tableSession.metadata.get("tableType") ??
+      (tableSession.metadata.get("deckId") ? "cards" : undefined);
+    if (tableType !== "cards" && tableType !== "timeline") {
+      throw new Error("This table type is not supported.");
+    }
+    activeTableType.value = tableType;
     activeDeckId.value = String(tableSession.metadata.get("deckId") ?? "");
+    if (tableType === "timeline") {
+      timelineItems.value = tableSession.timelineItems;
+      return;
+    }
     if (!deck.value) {
       throw new Error(
         "The deck for this table is not available in this client."
