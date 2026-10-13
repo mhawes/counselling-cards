@@ -1,6 +1,6 @@
-# Counselling Cards
+# Counselling Table
 
-Counselling Cards is a browser-based collaborative workspace with shared card tables and timeline tables. Timeline tables let participants add and arrange tokens and editable post-it notes. Trystero uses public Nostr relays for WebRTC peer discovery and signaling; table state is synchronized directly between peers with Yjs. Tables are temporary and remain available only while at least one participant stays connected.
+Counselling Table is a browser-based collaborative workspace with shared card tables and timeline tables. Timeline tables let participants add and arrange tokens and editable post-it notes. Trystero uses public Nostr relays for WebRTC peer discovery and signaling; table state is synchronized directly between peers with Yjs. Tables are temporary and remain available only while at least one participant stays connected.
 
 ## Local development
 
