@@ -86,7 +86,22 @@
               aria-label="Edit token label"
               @update:model-value="updateTokenText(item, $event)"
             />
+            <img
+              v-if="item.flowerId && flowerImageUrls[item.flowerId]"
+              class="timeline-flower-image"
+              :src="flowerImageUrls[item.flowerId]"
+              alt="Flower token"
+              draggable="false"
+            />
+            <img
+              v-else-if="item.shellId && shellImageUrls[item.shellId]"
+              class="timeline-flower-image"
+              :src="shellImageUrls[item.shellId]"
+              alt="Shell token"
+              draggable="false"
+            />
             <div
+              v-else-if="!item.flowerId && !item.shellId"
               class="timeline-token"
               :style="{ backgroundColor: item.color }"
               role="img"
@@ -125,6 +140,7 @@
           </div>
           <q-btn
             class="timeline-item-color"
+            :class="{ 'timeline-token-control': item.kind === 'token' }"
             round
             dense
             flat
@@ -143,15 +159,35 @@
                   dense
                   unelevated
                   class="timeline-color-swatch"
+                  v-close-popup
                   :style="{ backgroundColor: color }"
                   :aria-label="`Choose ${color}`"
                   @click="updateItemColor(item, color)"
+                />
+                <q-btn
+                  v-if="item.kind === 'token'"
+                  flat
+                  no-caps
+                  icon="local_florist"
+                  class="timeline-color-picker-flower"
+                  v-close-popup
+                  @click.stop="openFlowerPicker(item.itemId)"
+                />
+                <q-btn
+                  v-if="item.kind === 'token'"
+                  flat
+                  no-caps
+                  icon="water"
+                  class="timeline-color-picker-flower"
+                  v-close-popup
+                  @click.stop="openShellPicker(item.itemId)"
                 />
               </div>
             </q-menu>
           </q-btn>
           <q-btn
             class="timeline-item-delete"
+            :class="{ 'timeline-token-control': item.kind === 'token' }"
             round
             dense
             flat
@@ -164,6 +200,87 @@
         </div>
       </div>
     </div>
+    <q-dialog v-model="flowerPickerOpen">
+      <q-card class="flower-picker">
+        <q-card-section class="row items-center q-pb-sm">
+          <div class="text-h6">Choose a flower</div>
+          <q-space />
+          <q-btn
+            v-close-popup
+            round
+            dense
+            flat
+            icon="close"
+            aria-label="Close"
+          />
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <q-virtual-scroll
+            class="flower-picker-scroll"
+            :items="flowerRows"
+            :virtual-scroll-item-size="76"
+            v-slot="{ item: row }"
+          >
+            <div class="flower-picker-row">
+              <q-btn
+                v-for="flower in row"
+                :key="flower.id"
+                flat
+                round
+                class="flower-picker-option"
+                :aria-label="`Choose flower ${flower.id}`"
+                @click="chooseFlower(flower.id)"
+              >
+                <img :src="flower.url" alt="" draggable="false" />
+              </q-btn>
+            </div>
+          </q-virtual-scroll>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+    <q-dialog v-model="shellPickerOpen">
+      <q-card class="flower-picker shell-picker">
+        <q-card-section class="row items-center q-pb-sm">
+          <div class="text-h6">Choose a shell</div>
+          <q-space />
+          <q-btn
+            v-close-popup
+            round
+            dense
+            flat
+            icon="close"
+            aria-label="Close"
+          />
+        </q-card-section>
+        <q-card-section class="q-pt-none">
+          <q-virtual-scroll
+            class="flower-picker-scroll"
+            :items="shellRows"
+            :virtual-scroll-item-size="120"
+            v-slot="{ item: row }"
+          >
+            <div class="flower-picker-row shell-picker-row">
+              <q-btn
+                v-for="shell in row"
+                :key="shell.id"
+                flat
+                round
+                class="flower-picker-option shell-picker-option"
+                :aria-label="`Choose shell ${shell.id}`"
+                @click="chooseShell(shell.id)"
+              >
+                <img
+                  class="shell-picker-image"
+                  :src="shell.url"
+                  alt=""
+                  draggable="false"
+                />
+              </q-btn>
+            </div>
+          </q-virtual-scroll>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
@@ -179,7 +296,41 @@ const props = defineProps<{
 }>();
 
 type TimelineItem = TimelineItemState;
+interface TokenObjectAsset {
+  id: string;
+  url: string;
+}
 
+const flowerImageUrls = Object.fromEntries(
+  Object.entries(
+    import.meta.glob<string>("@/assets/token-objects/flowers/*.png", {
+      eager: true,
+      query: "?url",
+      import: "default"
+    })
+  ).map(([path, url]) => {
+    const filename = path.split(/[\\/]/).at(-1) ?? "";
+    return [filename.replace(/\.png$/, ""), url];
+  })
+);
+const flowers: TokenObjectAsset[] = Object.entries(flowerImageUrls)
+  .map(([id, url]) => ({ id, url }))
+  .sort((first, second) => first.id.localeCompare(second.id));
+const shellImageUrls = Object.fromEntries(
+  Object.entries(
+    import.meta.glob<string>("@/assets/token-objects/shells/*.png", {
+      eager: true,
+      query: "?url",
+      import: "default"
+    })
+  ).map(([path, url]) => {
+    const filename = path.split(/[\\/]/).at(-1) ?? "";
+    return [filename.replace(/\.png$/, ""), url];
+  })
+);
+const shells: TokenObjectAsset[] = Object.entries(shellImageUrls)
+  .map(([id, url]) => ({ id, url }))
+  .sort((first, second) => first.id.localeCompare(second.id));
 const ITEM_COLORS = [
   "#d66b4d",
   "#4f83a1",
@@ -202,7 +353,24 @@ const draggingItemId = ref<string | null>(null);
 const scrollTop = ref(0);
 const viewportHeight = ref(600);
 const timelineCenterOffset = ref(300);
+const flowerPickerOpen = ref(false);
+const shellPickerOpen = ref(false);
+const selectedTokenId = ref<string | null>(null);
 const timelineY = computed(() => scrollTop.value + timelineCenterOffset.value);
+const flowerRows = computed(() => {
+  const rows: TokenObjectAsset[][] = [];
+  for (let i = 0; i < flowers.length; i += 8) {
+    rows.push(flowers.slice(i, i + 8));
+  }
+  return rows;
+});
+const shellRows = computed(() => {
+  const rows: TokenObjectAsset[][] = [];
+  for (let i = 0; i < shells.length; i += 6) {
+    rows.push(shells.slice(i, i + 6));
+  }
+  return rows;
+});
 const canvasWidth = computed(() => {
   const rightEdge = items.value.reduce(
     (right, item) =>
@@ -294,7 +462,43 @@ function addItem(kind: TimelineItem["kind"]) {
 
 function updateItemColor(item: TimelineItem, color: string) {
   item.color = color;
+  if (item.kind === "token") {
+    delete item.flowerId;
+    delete item.shellId;
+  }
   syncItem(item);
+}
+
+function openFlowerPicker(itemId: string) {
+  selectedTokenId.value = itemId;
+  flowerPickerOpen.value = true;
+}
+
+function chooseFlower(flowerId: string) {
+  const item = items.value.find(
+    entry => entry.itemId === selectedTokenId.value
+  );
+  if (!item || item.kind !== "token") return;
+  delete item.shellId;
+  item.flowerId = flowerId;
+  syncItem(item);
+  flowerPickerOpen.value = false;
+}
+
+function openShellPicker(itemId: string) {
+  selectedTokenId.value = itemId;
+  shellPickerOpen.value = true;
+}
+
+function chooseShell(shellId: string) {
+  const item = items.value.find(
+    entry => entry.itemId === selectedTokenId.value
+  );
+  if (!item || item.kind !== "token") return;
+  delete item.flowerId;
+  item.shellId = shellId;
+  syncItem(item);
+  shellPickerOpen.value = false;
 }
 
 function itemTextColor(backgroundColor: string) {
@@ -509,7 +713,7 @@ onUnmounted(() => {
 .timeline-scroll {
   flex: 1;
   min-height: 0;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
 }
 
@@ -549,6 +753,14 @@ onUnmounted(() => {
   border-radius: 50%;
   color: white;
   box-shadow: 0 3px 8px rgb(0 0 0 / 28%);
+}
+
+.timeline-flower-image {
+  width: 104px;
+  height: 104px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
 }
 
 .timeline-token-group {
@@ -645,10 +857,91 @@ onUnmounted(() => {
 .timeline-item-color {
   position: absolute;
   top: -12px;
-  right: -12px;
+  right: 34px;
   z-index: 1;
   background: white;
   opacity: 0;
+}
+
+.timeline-note .timeline-item-delete {
+  top: -12px;
+  right: -12px;
+}
+
+.timeline-note .timeline-item-color {
+  right: 22px;
+}
+
+.timeline-token-control.timeline-item-delete,
+.timeline-token-control.timeline-item-color {
+  top: 62px;
+  right: auto;
+}
+
+.timeline-token-control.timeline-item-color {
+  left: 50%;
+  transform: translateX(calc(-100% - 4px));
+}
+
+.timeline-token-control.timeline-item-delete {
+  left: 50%;
+  transform: translateX(4px);
+}
+
+.flower-picker {
+  width: min(680px, 94vw);
+  max-height: 85vh;
+}
+
+.shell-picker {
+  width: min(820px, 96vw);
+  max-height: 92vh;
+}
+
+.flower-picker-scroll {
+  height: min(60vh, 520px);
+}
+
+.shell-picker .flower-picker-scroll {
+  box-sizing: border-box;
+  height: min(68vh, 460px);
+  padding: 20px 28px;
+}
+
+.flower-picker-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  min-height: 72px;
+}
+
+.shell-picker-row {
+  box-sizing: border-box;
+  min-height: 120px;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.flower-picker-option {
+  width: 72px;
+  height: 72px;
+}
+
+.shell-picker-option {
+  width: 104px;
+  height: 104px;
+}
+
+.flower-picker-option img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.shell-picker-image {
+  width: 64px !important;
+  height: 64px !important;
+  transform: rotate(37deg);
 }
 
 .timeline-color-picker {
@@ -656,6 +949,11 @@ onUnmounted(() => {
   grid-template-columns: repeat(4, 32px);
   gap: 8px;
   padding: 10px;
+}
+
+.timeline-color-picker-flower {
+  grid-column: 1 / -1;
+  justify-self: stretch;
 }
 
 .timeline-color-swatch {

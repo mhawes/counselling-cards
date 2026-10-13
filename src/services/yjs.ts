@@ -21,6 +21,8 @@ export interface TimelineItemState {
   zIndex: number;
   text: string;
   color: string;
+  flowerId?: string;
+  shellId?: string;
 }
 
 export interface TableSession {
