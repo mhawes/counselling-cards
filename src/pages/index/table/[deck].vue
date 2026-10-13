@@ -215,8 +215,16 @@
       </q-card>
     </q-dialog>
     <q-page-sticky v-if="deck" position="top-right" :offset="[18, 18]">
-      <q-chip color="white" text-color="primary" icon="group">
+      <q-chip
+        color="white"
+        text-color="primary"
+        icon="group"
+        clickable
+        aria-label="Copy table link to clipboard"
+        @click="copyRoomLink"
+      >
         Join code: <strong class="q-ml-xs">{{ tableCodeLabel }}</strong>
+        <q-tooltip>Copy room link</q-tooltip>
       </q-chip>
     </q-page-sticky>
   </q-page>
@@ -233,6 +241,7 @@ import {
 } from "vue";
 import { useRoute } from "vue-router";
 import interact from "interactjs";
+import { copyToClipboard, useQuasar } from "quasar";
 import { getDeckById, type Deck } from "@/decks";
 import type { YMapEvent } from "yjs";
 import TimelineTable from "@/components/TimelineTable.vue";
@@ -274,6 +283,7 @@ interface Card {
 }
 
 const route = useRoute();
+const $q = useQuasar();
 const tableRef = ref<HTMLElement | null>(null);
 const tableError = ref("");
 const activeDeckId = ref<string | null>(null);
@@ -300,6 +310,19 @@ let tableSession: TableSession | null = null;
 let disposed = false;
 let tableWaitController: AbortController | null = null;
 let cardStateObserver: ((event: YMapEvent<CardState>) => void) | null = null;
+
+async function copyRoomLink() {
+  try {
+    await copyToClipboard(window.location.href);
+    $q.notify({ type: "positive", message: "Link copied to clipboard" });
+  } catch (error) {
+    console.error("Failed to copy room link:", error);
+    $q.notify({
+      type: "negative",
+      message: "Could not copy link to clipboard"
+    });
+  }
+}
 
 /**
  * Apply the position to a card.

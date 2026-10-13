@@ -21,6 +21,7 @@ export interface TimelineItemState {
   zIndex: number;
   text: string;
   color: string;
+  highlighted?: boolean;
   flowerId?: string;
   shellId?: string;
 }

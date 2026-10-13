@@ -22,8 +22,16 @@
           no-caps
           @click="addItem('note')"
         />
-        <q-chip color="white" text-color="primary" icon="group">
+        <q-chip
+          color="white"
+          text-color="primary"
+          icon="group"
+          clickable
+          aria-label="Copy table link to clipboard"
+          @click="copyRoomLink"
+        >
           Join code: <strong class="q-ml-xs">{{ tableCode }}</strong>
+          <q-tooltip>Copy room link</q-tooltip>
         </q-chip>
       </div>
     </header>
@@ -55,7 +63,8 @@
           class="timeline-item"
           :class="{
             'timeline-note': item.kind === 'note',
-            'timeline-token-item': item.kind === 'token'
+            'timeline-token-item': item.kind === 'token',
+            'is-highlighted': item.highlighted
           }"
           :data-item-id="item.itemId"
           :data-x="item.x"
@@ -64,6 +73,7 @@
             transform: `translate3d(${item.x}px, ${item.y}px, 0)`,
             zIndex: item.zIndex
           }"
+          @click="handleItemClick($event, item)"
         >
           <div
             v-if="item.kind === 'token'"
@@ -138,6 +148,24 @@
               @update:model-value="updateNoteText(item, $event)"
             />
           </div>
+          <q-btn
+            class="timeline-item-highlight"
+            :class="{ 'timeline-token-control': item.kind === 'token' }"
+            round
+            dense
+            flat
+            size="sm"
+            color="dark"
+            :icon="item.highlighted ? 'star' : 'star_outline'"
+            :aria-label="
+              item.highlighted ? 'Remove item highlight' : 'Highlight item'
+            "
+            @click.stop="toggleItemHighlight(item)"
+          >
+            <q-tooltip>
+              {{ item.highlighted ? "Remove highlight" : "Highlight item" }}
+            </q-tooltip>
+          </q-btn>
           <q-btn
             class="timeline-item-color"
             :class="{ 'timeline-token-control': item.kind === 'token' }"
@@ -287,6 +315,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import interact from "interactjs";
+import { copyToClipboard, useQuasar } from "quasar";
 import type { YMapEvent } from "yjs";
 import type { TableSession, TimelineItemState } from "@/services/yjs";
 
@@ -295,6 +324,7 @@ const props = defineProps<{
   tableCode: string;
 }>();
 
+const $q = useQuasar();
 type TimelineItem = TimelineItemState;
 interface TokenObjectAsset {
   id: string;
@@ -392,6 +422,19 @@ let highestZIndex = 0;
 let itemObserver: ((event: YMapEvent<TimelineItemState>) => void) | null = null;
 let viewportObserver: ResizeObserver | null = null;
 
+async function copyRoomLink() {
+  try {
+    await copyToClipboard(window.location.href);
+    $q.notify({ type: "positive", message: "Link copied to clipboard" });
+  } catch (error) {
+    console.error("Failed to copy room link:", error);
+    $q.notify({
+      type: "negative",
+      message: "Could not copy link to clipboard"
+    });
+  }
+}
+
 function updateScrollViewport() {
   if (!scrollRef.value) return;
   scrollTop.value = scrollRef.value.scrollTop;
@@ -429,6 +472,22 @@ function itemState(item: TimelineItem): TimelineItemState {
 
 function syncItem(item: TimelineItem) {
   props.sharedItems.set(item.itemId, itemState(item));
+}
+
+function toggleItemHighlight(item: TimelineItem) {
+  item.highlighted = !item.highlighted;
+  syncItem(item);
+}
+
+function handleItemClick(event: MouseEvent, item: TimelineItem) {
+  if (!event.shiftKey) return;
+  if (
+    event.target instanceof HTMLElement &&
+    event.target.closest("button, input, textarea")
+  ) {
+    return;
+  }
+  toggleItemHighlight(item);
 }
 
 function addItem(kind: TimelineItem["kind"]) {
@@ -854,6 +913,15 @@ onUnmounted(() => {
   opacity: 0;
 }
 
+.timeline-item-highlight {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+  z-index: 1;
+  background: white;
+  opacity: 0;
+}
+
 .timeline-item-color {
   position: absolute;
   top: -12px;
@@ -872,20 +940,32 @@ onUnmounted(() => {
   right: 22px;
 }
 
+.timeline-note .timeline-item-highlight {
+  top: -12px;
+  left: auto;
+  right: 56px;
+}
+
 .timeline-token-control.timeline-item-delete,
-.timeline-token-control.timeline-item-color {
+.timeline-token-control.timeline-item-color,
+.timeline-token-control.timeline-item-highlight {
   top: 62px;
   right: auto;
 }
 
 .timeline-token-control.timeline-item-color {
   left: 50%;
-  transform: translateX(calc(-100% - 4px));
+  transform: translateX(-50%);
 }
 
 .timeline-token-control.timeline-item-delete {
-  left: 50%;
-  transform: translateX(4px);
+  left: calc(50% + 30px);
+  transform: translateX(-50%);
+}
+
+.timeline-token-control.timeline-item-highlight {
+  left: calc(50% - 30px);
+  transform: translateX(-50%);
 }
 
 .flower-picker {
@@ -965,6 +1045,9 @@ onUnmounted(() => {
 .timeline-item:hover .timeline-item-color,
 .timeline-item:focus-within .timeline-item-color,
 .timeline-item.is-dragging .timeline-item-color,
+.timeline-item:hover .timeline-item-highlight,
+.timeline-item:focus-within .timeline-item-highlight,
+.timeline-item.is-dragging .timeline-item-highlight,
 .timeline-item:hover .timeline-item-delete,
 .timeline-item:focus-within .timeline-item-delete,
 .timeline-item.is-dragging .timeline-item-delete {
@@ -973,6 +1056,20 @@ onUnmounted(() => {
 
 .timeline-item.is-dragging {
   cursor: grabbing;
+}
+
+.timeline-item.is-highlighted .timeline-token-group {
+  filter: drop-shadow(0 0 5px rgb(16 59 255 / 95%))
+    drop-shadow(0 0 10px rgb(1 132 255 / 70%));
+}
+
+.timeline-item.is-highlighted .timeline-note-paper {
+  outline: 3px solid rgb(82 108 255);
+  outline-offset: 1px;
+  box-shadow:
+    0 2px 8px rgb(0 0 0 / 12%),
+    0 0 8px 3px rgb(16 59 255 / 95%),
+    0 0 16px 6px rgb(1 132 255 / 70%);
 }
 
 @media (max-width: 700px) {
